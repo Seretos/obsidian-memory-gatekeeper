@@ -1,0 +1,119 @@
+/* ---- File explorer markers ---- */
+.nav-file-title.gatekeeper-new,
+.nav-file-title.gatekeeper-modified {
+  border-left: 4px solid transparent;
+  font-weight: var(--font-bold);
+  border-radius: var(--radius-s);
+}
+.nav-file-title.gatekeeper-new {
+  border-left-color: var(--color-green, #44cf6e);
+  background-color: rgba(68, 207, 110, 0.16);
+}
+.nav-file-title.gatekeeper-modified {
+  border-left-color: var(--color-orange, #e0a83b);
+  background-color: rgba(224, 168, 59, 0.18);
+}
+.nav-file-title.gatekeeper-new .nav-file-title-content::after,
+.nav-file-title.gatekeeper-modified .nav-file-title-content::after {
+  margin-left: 6px;
+  font-size: 0.85em;
+  font-weight: var(--font-bold);
+  vertical-align: middle;
+}
+.nav-file-title.gatekeeper-new .nav-file-title-content::after {
+  content: "● new";
+  color: var(--color-green, #44cf6e);
+}
+.nav-file-title.gatekeeper-modified .nav-file-title-content::after {
+  content: "● mod";
+  color: var(--color-orange, #e0a83b);
+}
+
+/* ---- Review panel ---- */
+.gatekeeper-review .gatekeeper-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+.gatekeeper-group-header {
+  margin: 0.8em 0 0.3em;
+  font-weight: var(--font-bold);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.gatekeeper-row {
+  padding: 4px 6px;
+  border-radius: var(--radius-s);
+  border-left: 3px solid transparent;
+  margin-bottom: 2px;
+}
+.gatekeeper-row.gatekeeper-new {
+  border-left-color: var(--color-green, #44cf6e);
+}
+.gatekeeper-row.gatekeeper-modified {
+  border-left-color: var(--color-orange, #e0a83b);
+}
+.gatekeeper-row-name {
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+  word-break: break-all;
+}
+.gatekeeper-row-name:hover {
+  text-decoration: underline;
+}
+.gatekeeper-row-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.gatekeeper-row-buttons button {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 8px;
+}
+
+/* ---- Diff modal ---- */
+.gatekeeper-diff-note {
+  color: var(--text-accent);
+  font-size: var(--font-ui-small);
+}
+.gatekeeper-diff-pre {
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--background-secondary);
+  padding: 8px;
+  border-radius: var(--radius-s);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  white-space: pre-wrap;
+}
+.gatekeeper-diff-pre > div {
+  padding: 0 4px;
+}
+.gatekeeper-line-added {
+  background: rgba(68, 207, 110, 0.18);
+}
+.gatekeeper-line-removed {
+  background: rgba(224, 70, 70, 0.18);
+}
+.gatekeeper-line-context {
+  color: var(--text-muted);
+}
+.gatekeeper-diff-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+/* ---- Settings ---- */
+.gatekeeper-settings-status {
+  margin: -6px 0 12px;
+  font-size: var(--font-ui-small);
+}
+.gatekeeper-status-active {
+  color: var(--color-green, #44cf6e);
+}
+.gatekeeper-status-inactive {
+  color: var(--text-muted);
+}

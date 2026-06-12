@@ -1,0 +1,30 @@
+{
+  "name": "obsidian-memory-gatekeeper",
+  "version": "0.1.0",
+  "description": "Obsidian plugin to review and gate Claude memory changes by diffing the vault against a real memory folder.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "typecheck": "tsc -noEmit -skipLibCheck"
+  },
+  "keywords": [
+    "obsidian",
+    "claude",
+    "memory"
+  ],
+  "author": "Arne von Appen",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/diff": "^5.2.1",
+    "@types/node": "^20.11.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.0",
+    "obsidian": "^1.7.2",
+    "tslib": "^2.6.2",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "diff": "^5.2.0"
+  }
+}

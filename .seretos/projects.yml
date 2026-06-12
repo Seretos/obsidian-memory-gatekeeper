@@ -1,0 +1,16 @@
+version: 1
+
+projects:
+  - id: obsidian-memory-gatekeeper
+    description: ""
+    provider: github
+    path: Seretos/obsidian-memory-gatekeeper
+    token_env: GITHUB_TOKEN
+    permissions:
+      issues:
+        create: true
+        modify: true
+      pulls:
+        create: true
+        modify: true
+        merge: false
