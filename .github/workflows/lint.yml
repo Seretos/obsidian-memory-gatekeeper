@@ -1,0 +1,26 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: curl -sL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash -s 1.7.7
+
+      - name: Run actionlint
+        run: ./actionlint -shellcheck= .github/workflows/*.yml
+
+      - name: Validate manifest.json
+        run: jq empty manifest.json
+
+      - name: Validate versions.json
+        run: jq empty versions.json

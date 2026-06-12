@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (semver, no leading v)"
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Validate semver
+        run: |
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: version '$VERSION' is not a valid semver (expected X.Y.Z, no leading v)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Check tag does not exist
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q .; then
+            echo "ERROR: tag v${VERSION} already exists on the remote"
+            exit 1
+          fi
+
+      - name: Stamp manifest.json
+        run: |
+          jq --arg v "$VERSION" '.version = $v' manifest.json > tmp.json
+          mv tmp.json manifest.json
+
+      - name: Stamp versions.json
+        run: |
+          MIN=$(jq -r '.minAppVersion' manifest.json)
+          jq --arg v "$VERSION" --arg m "$MIN" '. + {($v): $m}' versions.json > tmp.json
+          mv tmp.json versions.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Create release zip
+        run: zip "obsidian-memory-gatekeeper-${VERSION}.zip" manifest.json main.js styles.css versions.json
+
+      - name: Force-push orphan release branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan release-tmp
+          git reset
+          git add -f manifest.json main.js styles.css versions.json
+          git commit -m "release: v${VERSION}"
+          git push origin HEAD:release --force
+
+      - name: Capture release SHA
+        id: sha
+        run: echo "RELEASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.RELEASE_SHA }}
+        run: |
+          git tag "v${VERSION}" "$RELEASE_SHA"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ steps.sha.outputs.RELEASE_SHA }}
+        run: |
+          gh release create "v${VERSION}" \
+            --target "$RELEASE_SHA" \
+            --title "v${VERSION}" \
+            --notes "Release v${VERSION}" \
+            manifest.json \
+            main.js \
+            styles.css \
+            "obsidian-memory-gatekeeper-${VERSION}.zip"
+
+      - name: Open cross-repo update ticket
+        id: cross-repo-ticket
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.MEMORY_GATEKEEPER_TICKET_TOKEN }}
+          TICKET_TITLE: "chore(update): obsidian-memory-gatekeeper v${{ inputs.version }} released"
+          TICKET_BODY: |
+            obsidian-memory-gatekeeper v${{ inputs.version }} has been released.
+
+            Please update any references or integrations to use the new version.
+
+            Release: https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }}
+        run: |
+          EXISTING=$(gh issue list \
+            --repo Seretos/agent-claude-memory-gatekeeper \
+            --state open \
+            --search "$TICKET_TITLE" \
+            --json number \
+            --jq length)
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Cross-repo ticket already exists, skipping creation."
+            exit 0
+          fi
+          gh issue create \
+            --repo Seretos/agent-claude-memory-gatekeeper \
+            --title "$TICKET_TITLE" \
+            --body "$TICKET_BODY"
+
+      - name: Report cross-repo ticket outcome
+        if: always()
+        env:
+          TICKET_OUTCOME: ${{ steps.cross-repo-ticket.outcome }}
+        run: |
+          if [ "$TICKET_OUTCOME" != "success" ]; then
+            echo "WARNING: Cross-repo ticket step did not succeed (outcome: ${TICKET_OUTCOME})."
+            echo "Please manually open a ticket in Seretos/agent-claude-memory-gatekeeper for v${VERSION}."
+          else
+            echo "Cross-repo ticket step succeeded."
+          fi
