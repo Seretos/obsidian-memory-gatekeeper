@@ -157,23 +157,25 @@
    dashed = deleted side) and inline edits use underline / line-through so the
    change is legible without relying on hue. */
 .gatekeeper-compare-editor .cm-changedLine {
-  background-color: rgba(64, 191, 128, 0.18);
-  box-shadow: inset 3px 0 0 0 #2ea043;
+  background-color: rgba(64, 191, 128, 0.32);
+  box-shadow: inset 4px 0 0 0 #2ea043;
 }
 .gatekeeper-compare-editor .cm-changedText {
-  background-color: rgba(64, 191, 128, 0.4);
+  /* The actually-changed words: near-solid fill + underline so they pop even
+     when the line background blends into a dark theme. */
+  background-color: rgba(46, 160, 67, 0.75);
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 2px;
   border-radius: 2px;
 }
 .gatekeeper-compare-editor .cm-deletedChunk {
-  background-color: rgba(224, 80, 80, 0.18);
-  box-shadow: inset 3px 0 0 0 #d04545;
+  background-color: rgba(224, 80, 80, 0.32);
+  box-shadow: inset 4px 0 0 0 #d04545;
 }
 .gatekeeper-compare-editor .cm-deletedChunk .cm-deletedText,
 .gatekeeper-compare-editor .cm-deletedText {
-  background-color: rgba(224, 80, 80, 0.4);
+  background-color: rgba(208, 69, 69, 0.75);
   text-decoration: line-through;
   text-decoration-thickness: 2px;
 }
@@ -272,18 +274,27 @@
    Removed (memory/old): dashed red left bar + light fill.
    Solid-vs-dashed bar and the "+"/"−" labels carry the meaning without hue. */
 .gatekeeper-change-added {
-  background-color: rgba(64, 191, 128, 0.12);
-  border-left: 4px solid #2ea043;
+  background-color: rgba(64, 191, 128, 0.28);
+  border-left: 6px solid #2ea043;
 }
 .gatekeeper-change-removed {
-  background-color: rgba(224, 80, 80, 0.1);
-  border-left: 4px dashed #d04545;
+  background-color: rgba(224, 80, 80, 0.26);
+  border-left: 6px dashed #d04545;
 }
 .gatekeeper-change-cell-label {
+  display: inline-block;
   font-weight: var(--font-bold);
   font-size: var(--font-ui-smaller);
-  margin-bottom: 4px;
-  color: var(--text-muted);
+  margin-bottom: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-s);
+  color: var(--text-on-accent);
+}
+.gatekeeper-change-added .gatekeeper-change-cell-label {
+  background-color: #2ea043;
+}
+.gatekeeper-change-removed .gatekeeper-change-cell-label {
+  background-color: #d04545;
 }
 .gatekeeper-change-empty {
   font-style: italic;
