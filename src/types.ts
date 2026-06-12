@@ -1,4 +1,5 @@
 export const REVIEW_VIEW_TYPE = "memory-gatekeeper-review";
+export const COMPARE_VIEW_TYPE = "memory-gatekeeper-compare";
 
 /** Status of a vault file relative to its counterpart in the target memory folder. */
 export type FileStatus = "new" | "modified" | "identical";
@@ -27,6 +28,9 @@ export interface GatekeeperActions {
   accept(relPath: string): Promise<void>;
   dismiss(relPath: string): Promise<void>;
   openFile(relPath: string): Promise<void>;
+  openCompare(relPath: string): Promise<void>;
+  writeVault(relPath: string, content: string): Promise<void>;
+  writeTarget(relPath: string, content: string): Promise<void>;
 }
 
 export interface GatekeeperSettings {

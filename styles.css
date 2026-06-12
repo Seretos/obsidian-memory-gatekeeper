@@ -106,6 +106,94 @@
   justify-content: flex-end;
 }
 
+/* ---- Compare view ---- */
+.gatekeeper-compare {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.gatekeeper-compare-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+.gatekeeper-compare-filename {
+  flex: 1;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gatekeeper-compare-panes {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  overflow: hidden;
+}
+.gatekeeper-compare-pane {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+}
+.gatekeeper-compare-pane + .gatekeeper-compare-pane {
+  border-left: 1px solid var(--background-modifier-border);
+}
+.gatekeeper-compare-pane-header {
+  font-weight: var(--font-bold);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.gatekeeper-compare-pane-content {
+  font-size: var(--font-ui-small);
+}
+.gatekeeper-compare-editor {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+.gatekeeper-compare-editor .cm-mergeView {
+  height: 100%;
+}
+.gatekeeper-compare-editor .cm-mergeViewEditors {
+  height: 100%;
+}
+.gatekeeper-compare-editor .cm-mergeViewEditor {
+  flex: 1;
+  overflow: auto;
+}
+.gatekeeper-hunk-actions {
+  padding: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+.gatekeeper-hunk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: var(--font-ui-small);
+}
+.gatekeeper-hunk-accept,
+.gatekeeper-hunk-revert {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 8px;
+}
+.gatekeeper-hunk-added {
+  background: rgba(68, 207, 110, 0.18);
+}
+.gatekeeper-hunk-removed {
+  background: rgba(224, 70, 70, 0.18);
+}
+
 /* ---- Settings ---- */
 .gatekeeper-settings-status {
   margin: -6px 0 12px;

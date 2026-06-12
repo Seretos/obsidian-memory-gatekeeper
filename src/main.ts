@@ -8,12 +8,14 @@ import { ComparisonEngine } from "./comparison-engine";
 import { ExplorerDecorator } from "./explorer-decorator";
 import { GraphDecorator } from "./graph-decorator";
 import { ReviewView } from "./review-view";
+import { CompareView } from "./compare-view";
 import { StatusStore } from "./status-store";
 import { DiffModal } from "./diff-view";
 import { GatekeeperSettingTab, isValidTargetFolder } from "./settings";
 import {
   DEFAULT_SETTINGS,
   REVIEW_VIEW_TYPE,
+  COMPARE_VIEW_TYPE,
   type DiffData,
   type GatekeeperActions,
   type GatekeeperSettings,
@@ -38,6 +40,10 @@ export default class MemoryGatekeeperPlugin
       (leaf) =>
         new ReviewView(leaf, this.store, this, () => this.isConfigured()),
     );
+    this.registerView(
+      COMPARE_VIEW_TYPE,
+      (leaf) => new CompareView(leaf, this),
+    );
 
     this.addSettingTab(new GatekeeperSettingTab(this.app, this));
 
@@ -54,6 +60,18 @@ export default class MemoryGatekeeperPlugin
       id: "rescan",
       name: "Rescan memory differences",
       callback: () => void this.engine?.scan(),
+    });
+    this.addCommand({
+      id: "open-compare-view",
+      name: "Open side-by-side compare for active file",
+      callback: () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new Notice("No active file to compare.");
+          return;
+        }
+        void this.openCompare(file.path);
+      },
     });
 
     // The explorer rebuilds its DOM and graph leaves open/close on these
@@ -78,8 +96,8 @@ export default class MemoryGatekeeperPlugin
         menu.addItem((item) =>
           item
             .setTitle("Memory: show diff")
-            .setIcon("git-compare")
-            .onClick(() => new DiffModal(this.app, file.path, this).open()),
+            .setIcon("git-compare-arrows")
+            .onClick(() => void this.openCompare(file.path)),
         );
         menu.addItem((item) =>
           item
@@ -207,6 +225,27 @@ export default class MemoryGatekeeperPlugin
     if (file instanceof TFile) {
       await this.app.workspace.getLeaf(false).openFile(file);
     }
+  }
+
+  async openCompare(relPath: string): Promise<void> {
+    const { workspace } = this.app;
+    const leaf = workspace.getLeaf("tab");
+    await leaf.setViewState({
+      type: COMPARE_VIEW_TYPE,
+      active: true,
+      state: { relPath },
+    });
+    workspace.revealLeaf(leaf);
+  }
+
+  async writeVault(relPath: string, content: string): Promise<void> {
+    if (!this.engine) throw new Error("Plugin is not active.");
+    await this.engine.writeVault(relPath, content);
+  }
+
+  async writeTarget(relPath: string, content: string): Promise<void> {
+    if (!this.engine) throw new Error("Plugin is not active.");
+    await this.engine.writeTarget(relPath, content);
   }
 
   // --- settings -----------------------------------------------------------
