@@ -303,6 +303,14 @@ export class CompareView extends ItemView {
       });
     }
 
+    // DELIBERATE TRADEOFF (user-confirmed): each segment is rendered as a
+    // STANDALONE Markdown fragment so changes can be highlighted inline with
+    // per-hunk accept/revert buttons anchored at the change. The cost is that a
+    // multi-block construct split across a change boundary — a table whose body
+    // row is edited, a fenced code block, a multi-block list — can mis-render,
+    // because the fragment is parsed without its surrounding context. This is
+    // accepted for the rendered compare view (it's great for prose/headings);
+    // the Edit/MergeView mode shows the exact source for those cases.
     let changeNo = 0;
     for (const seg of segments) {
       // A newer render superseded this one (e.g. a rapid second hunk click) —
@@ -359,6 +367,11 @@ export class CompareView extends ItemView {
       "aria-label",
       "Memory-Version (rechts) in Vault übernehmen — Vault-Änderung verwerfen",
     );
+    // DELIBERATE merge semantics (user-confirmed): revert = "take the Memory
+    // version". For a brand-new proposal (no memory file, empty right side) that
+    // means the vault region is emptied — nothing is written until Save, and the
+    // separate gatekeeper dismiss() flow is intentionally NOT wired in here; this
+    // view stays a pure two-text merge tool.
     revertBtn.onclick = () => {
       this.leftBuffer = applyHunkToVaultText(
         this.leftBuffer,
