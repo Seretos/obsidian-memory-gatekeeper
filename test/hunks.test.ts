@@ -4,7 +4,9 @@ import {
   computeHunks,
   applyHunkToLeft,
   applyHunkToRight,
+  buildDiffSegments,
   type Hunk,
+  type ChangeSegment,
 } from "../src/core/hunks";
 import { computeDiffLines } from "../src/core/diff-lines";
 
@@ -263,5 +265,93 @@ describe("computeHunks", () => {
     expect(hunks).toHaveLength(1);
     const contextCount = hunks[0].lines.filter((l) => l.type === "context").length;
     expect(contextCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDiffSegments
+// ---------------------------------------------------------------------------
+
+describe("buildDiffSegments", () => {
+  it("returns a single context segment for identical files", () => {
+    const segs = buildDiffSegments("a\nb\nc", "a\nb\nc");
+    expect(segs).toEqual([{ type: "context", lines: ["a", "b", "c"] }]);
+  });
+
+  it("returns [] for two empty strings", () => {
+    // computeDiffLines("","") yields a single empty context line; collapse it.
+    const segs = buildDiffSegments("", "");
+    // One context segment containing the single empty line.
+    expect(segs).toEqual([{ type: "context", lines: [""] }]);
+  });
+
+  it("wraps a substitution as one change segment with old/new split", () => {
+    const segs = buildDiffSegments("a\nOLD\nc", "a\nNEW\nc");
+    expect(segs).toHaveLength(3);
+    expect(segs[0]).toEqual({ type: "context", lines: ["a"] });
+    expect(segs[1].type).toBe("change");
+    const change = segs[1] as ChangeSegment;
+    expect(change.removed).toEqual(["OLD"]);
+    expect(change.added).toEqual(["NEW"]);
+    expect(segs[2]).toEqual({ type: "context", lines: ["c"] });
+  });
+
+  it("represents a pure insertion with empty removed", () => {
+    const segs = buildDiffSegments("a\nc", "a\nNEW\nc");
+    const change = segs.find((s) => s.type === "change") as ChangeSegment;
+    expect(change.removed).toEqual([]);
+    expect(change.added).toEqual(["NEW"]);
+  });
+
+  it("represents a pure deletion with empty added", () => {
+    const segs = buildDiffSegments("a\nGONE\nc", "a\nc");
+    const change = segs.find((s) => s.type === "change") as ChangeSegment;
+    expect(change.removed).toEqual(["GONE"]);
+    expect(change.added).toEqual([]);
+  });
+
+  it("produces separate change segments for disjoint edits", () => {
+    const before = "a\nOLD1\nc\nd\nOLD2\nf";
+    const after = "a\nNEW1\nc\nd\nNEW2\nf";
+    const segs = buildDiffSegments(before, after);
+    const changes = segs.filter((s) => s.type === "change") as ChangeSegment[];
+    expect(changes).toHaveLength(2);
+    expect(changes[0].removed).toEqual(["OLD1"]);
+    expect(changes[0].added).toEqual(["NEW1"]);
+    expect(changes[1].removed).toEqual(["OLD2"]);
+    expect(changes[1].added).toEqual(["NEW2"]);
+  });
+
+  it("attaches a hunk to each change segment that applies correctly", () => {
+    const before = "a\nOLD\nc"; // target
+    const after = "a\nNEW\nc"; // vault
+    const segs = buildDiffSegments(before, after);
+    const change = segs.find((s) => s.type === "change") as ChangeSegment;
+
+    // accept vault → target: target becomes vault
+    const target = before.split("\n");
+    expect(applyHunkToRight(target, change.hunk)).toEqual(["a", "NEW", "c"]);
+
+    // revert vault ← target: vault becomes target
+    const vault = after.split("\n");
+    expect(applyHunkToLeft(vault, change.hunk)).toEqual(["a", "OLD", "c"]);
+  });
+
+  it("change segments are 1:1 and in order with groupHunks(diff, 0)", () => {
+    const before = "a\nOLD1\nc\nOLD2\ne";
+    const after = "a\nNEW1\nc\nNEW2\ne";
+    const segs = buildDiffSegments(before, after);
+    const changes = segs.filter((s) => s.type === "change") as ChangeSegment[];
+    const hunks = groupHunks(computeDiffLines(before, after), 0);
+    expect(changes.map((c) => c.hunk)).toEqual(hunks);
+  });
+
+  it("handles a change at the very start (no leading context)", () => {
+    const segs = buildDiffSegments("OLD\nb", "NEW\nb");
+    expect(segs[0].type).toBe("change");
+    const change = segs[0] as ChangeSegment;
+    expect(change.removed).toEqual(["OLD"]);
+    expect(change.added).toEqual(["NEW"]);
+    expect(segs[1]).toEqual({ type: "context", lines: ["b"] });
   });
 });

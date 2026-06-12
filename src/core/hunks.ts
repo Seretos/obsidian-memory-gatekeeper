@@ -178,3 +178,73 @@ export function computeHunks(
 ): Hunk[] {
   return groupHunks(computeDiffLines(before, after), contextLines);
 }
+
+/** Unchanged run, identical on both sides. */
+export interface ContextSegment {
+  type: "context";
+  lines: string[];
+}
+
+/**
+ * A changed region. `removed` are the "before"/target lines (old), `added`
+ * are the "after"/vault lines (new). Either may be empty (pure insertion or
+ * pure deletion). `hunk` carries the exact 0-context index ranges so the
+ * change can be applied with applyHunkToLeft / applyHunkToRight.
+ */
+export interface ChangeSegment {
+  type: "change";
+  removed: string[];
+  added: string[];
+  hunk: Hunk;
+}
+
+export type DiffSegment = ContextSegment | ChangeSegment;
+
+/**
+ * Split the diff between `before` (target) and `after` (vault) into an ordered
+ * sequence of context and change segments. Consecutive unchanged lines collapse
+ * into one ContextSegment; each maximal run of added/removed lines becomes one
+ * ChangeSegment carrying its exact Hunk (0 context lines). The change segments
+ * are in 1:1 order with `groupHunks(diff, 0)`.
+ *
+ * This is the rendering-agnostic backbone of the compare view: the UI walks
+ * these segments to render unchanged prose once and changed prose as aligned
+ * old-vs-new blocks with per-hunk accept/revert controls. Pure — no DOM access.
+ */
+export function buildDiffSegments(before: string, after: string): DiffSegment[] {
+  const diff = computeDiffLines(before, after);
+  const hunks = groupHunks(diff, 0);
+
+  const segments: DiffSegment[] = [];
+  let context: string[] = [];
+  let hunkIdx = 0;
+  let i = 0;
+
+  const flushContext = (): void => {
+    if (context.length > 0) {
+      segments.push({ type: "context", lines: context });
+      context = [];
+    }
+  };
+
+  while (i < diff.length) {
+    if (diff[i].type === "context") {
+      context.push(diff[i].text);
+      i++;
+      continue;
+    }
+    // Start of a change run — flush any pending context first.
+    flushContext();
+    const removed: string[] = [];
+    const added: string[] = [];
+    while (i < diff.length && diff[i].type !== "context") {
+      if (diff[i].type === "removed") removed.push(diff[i].text);
+      else added.push(diff[i].text);
+      i++;
+    }
+    segments.push({ type: "change", removed, added, hunk: hunks[hunkIdx++] });
+  }
+  flushContext();
+
+  return segments;
+}

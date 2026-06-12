@@ -10,7 +10,12 @@ import { MergeView } from "@codemirror/merge";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
 import { COMPARE_VIEW_TYPE, type GatekeeperActions } from "./types";
-import { computeHunks, applyHunkToLeft, applyHunkToRight } from "./core/hunks";
+import {
+  buildDiffSegments,
+  applyHunkToLeft,
+  applyHunkToRight,
+  type ChangeSegment,
+} from "./core/hunks";
 
 type CompareMode = "edit" | "compare";
 
@@ -216,97 +221,136 @@ export class CompareView extends ItemView {
 
   private async renderCompareMode(): Promise<void> {
     if (!this.contentArea) return;
-    // Clear any previous render before building new panes (prevents DOM
-    // accumulation when called from hunk-apply onclick handlers).
+    // Clear any previous render before building (prevents DOM accumulation when
+    // called from hunk-apply onclick handlers).
     this.contentArea.empty();
 
-    const leftPane = this.contentArea.createDiv({
-      cls: "gatekeeper-compare-pane gatekeeper-compare-pane-left",
-    });
-    const rightPane = this.contentArea.createDiv({
-      cls: "gatekeeper-compare-pane gatekeeper-compare-pane-right",
+    const root = this.contentArea.createDiv({
+      cls: "gatekeeper-compare-rendered",
     });
 
-    // Pane headers
-    leftPane.createEl("div", {
-      cls: "gatekeeper-compare-pane-header",
-      text: "Vault (gatekeeper)",
+    // Legend / column key — non-color cues spelled out for accessibility.
+    const legend = root.createDiv({ cls: "gatekeeper-compare-legend" });
+    legend.createSpan({
+      cls: "gatekeeper-legend-added",
+      text: "+ Vault (neu)",
     });
-    rightPane.createEl("div", {
-      cls: "gatekeeper-compare-pane-header",
-      text: "Memory (target)",
-    });
-
-    const leftContent = leftPane.createDiv({
-      cls: "gatekeeper-compare-pane-content",
-    });
-    const rightContent = rightPane.createDiv({
-      cls: "gatekeeper-compare-pane-content",
+    legend.createSpan({
+      cls: "gatekeeper-legend-removed",
+      text: "− Memory (alt)",
     });
 
-    // Render markdown in each pane (this is a Component — lifecycle managed here).
-    await MarkdownRenderer.render(
-      this.app,
-      this.leftBuffer,
-      leftContent,
-      this.relPath,
-      this,
-    );
-    await MarkdownRenderer.render(
-      this.app,
-      this.rightBuffer,
-      rightContent,
-      this.relPath,
-      this,
-    );
+    const segments = buildDiffSegments(this.rightBuffer, this.leftBuffer);
+    const hasChange = segments.some((s) => s.type === "change");
+    if (!hasChange) {
+      root.createDiv({
+        cls: "gatekeeper-compare-identical",
+        text: "Keine Unterschiede — Vault und Memory sind identisch.",
+      });
+    }
 
-    // Render per-hunk action buttons below the markdown.
     // NOTE: MarkdownRenderer.render registers MarkdownRenderChild instances on
     // `this` (the Component). Those children accumulate across re-renders because
     // there is no public API to selectively unload them without unloading the
     // whole view. The practical leak is minor (inactive event listeners on
     // replaced DOM nodes), and fixing it cleanly would require a scoped sub-
     // Component per render cycle — complexity not warranted at this stage.
-    this.renderHunkActions();
+    let changeNo = 0;
+    for (const seg of segments) {
+      if (seg.type === "context") {
+        // Unchanged prose, rendered once, full width.
+        const ctx = root.createDiv({ cls: "gatekeeper-seg-context" });
+        await this.renderMarkdownInto(seg.lines.join("\n"), ctx);
+      } else {
+        changeNo++;
+        await this.renderChangeSegment(root, seg, changeNo);
+      }
+    }
   }
 
-  private renderHunkActions(): void {
-    const hunks = computeHunks(this.rightBuffer, this.leftBuffer);
-    if (hunks.length === 0) return;
+  /** Render one change segment: toolbar + side-by-side old/new rendered blocks. */
+  private async renderChangeSegment(
+    root: HTMLElement,
+    seg: ChangeSegment,
+    changeNo: number,
+  ): Promise<void> {
+    const block = root.createDiv({ cls: "gatekeeper-change" });
 
-    const actionsEl = this.contentArea!.createDiv({
-      cls: "gatekeeper-hunk-actions",
+    // Toolbar with the per-hunk accept/revert controls, anchored at the change.
+    const toolbar = block.createDiv({ cls: "gatekeeper-change-toolbar" });
+    toolbar.createSpan({
+      cls: "gatekeeper-change-label",
+      text: `Änderung ${changeNo}`,
     });
-    actionsEl.createEl("strong", { text: `${hunks.length} diff region(s):` });
+    const acceptBtn = toolbar.createEl("button", {
+      cls: "gatekeeper-change-accept",
+      text: "Vault übernehmen →",
+    });
+    acceptBtn.setAttribute(
+      "aria-label",
+      "Vault-Version (links) in Memory übernehmen",
+    );
+    acceptBtn.onclick = () => {
+      this.rightBuffer = applyHunkToRight(
+        this.rightBuffer.split("\n"),
+        seg.hunk,
+      ).join("\n");
+      this.isDirty = true;
+      void this.renderCompareMode();
+    };
+    const revertBtn = toolbar.createEl("button", {
+      cls: "gatekeeper-change-revert",
+      text: "← Memory übernehmen",
+    });
+    revertBtn.setAttribute(
+      "aria-label",
+      "Memory-Version (rechts) in Vault übernehmen — Vault-Änderung verwerfen",
+    );
+    revertBtn.onclick = () => {
+      this.leftBuffer = applyHunkToLeft(
+        this.leftBuffer.split("\n"),
+        seg.hunk,
+      ).join("\n");
+      this.isDirty = true;
+      void this.renderCompareMode();
+    };
 
-    for (let i = 0; i < hunks.length; i++) {
-      const hunk = hunks[i];
-      const row = actionsEl.createDiv({ cls: "gatekeeper-hunk-row" });
-      row.createEl("span", { text: `Hunk ${i + 1}` });
+    // Two columns: left = vault (new, added), right = memory (old, removed).
+    const cols = block.createDiv({ cls: "gatekeeper-change-cols" });
 
-      const acceptBtn = row.createEl("button", {
-        text: "Accept vault → target",
-        cls: "gatekeeper-hunk-accept",
+    const leftCell = cols.createDiv({
+      cls: "gatekeeper-change-cell gatekeeper-change-added",
+    });
+    leftCell.createDiv({ cls: "gatekeeper-change-cell-label", text: "+ Vault (neu)" });
+    const leftBody = leftCell.createDiv({ cls: "gatekeeper-change-cell-body" });
+    if (seg.added.length > 0) {
+      await this.renderMarkdownInto(seg.added.join("\n"), leftBody);
+    } else {
+      leftBody.createDiv({
+        cls: "gatekeeper-change-empty",
+        text: "(nichts — diese Zeilen werden in Vault entfernt)",
       });
-      acceptBtn.onclick = () => {
-        const targetLines = this.rightBuffer.split("\n");
-        this.rightBuffer = applyHunkToRight(targetLines, hunk).join("\n");
-        this.isDirty = true;
-        // Re-render compare mode to reflect change.
-        void this.renderCompareMode();
-      };
-
-      const revertBtn = row.createEl("button", {
-        text: "Revert vault ← target",
-        cls: "gatekeeper-hunk-revert",
-      });
-      revertBtn.onclick = () => {
-        const vaultLines = this.leftBuffer.split("\n");
-        this.leftBuffer = applyHunkToLeft(vaultLines, hunk).join("\n");
-        this.isDirty = true;
-        void this.renderCompareMode();
-      };
     }
+
+    const rightCell = cols.createDiv({
+      cls: "gatekeeper-change-cell gatekeeper-change-removed",
+    });
+    rightCell.createDiv({ cls: "gatekeeper-change-cell-label", text: "− Memory (alt)" });
+    const rightBody = rightCell.createDiv({ cls: "gatekeeper-change-cell-body" });
+    if (seg.removed.length > 0) {
+      await this.renderMarkdownInto(seg.removed.join("\n"), rightBody);
+    } else {
+      rightBody.createDiv({
+        cls: "gatekeeper-change-empty",
+        text: "(nichts — diese Zeilen sind nur in Vault neu)",
+      });
+    }
+  }
+
+  /** Render a markdown fragment into `el` with Obsidian reading-view styling. */
+  private async renderMarkdownInto(md: string, el: HTMLElement): Promise<void> {
+    el.addClass("markdown-rendered");
+    await MarkdownRenderer.render(this.app, md, el, this.relPath, this);
   }
 
   // -------------------------------------------------------------------------
