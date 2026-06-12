@@ -78,6 +78,12 @@ export class CompareView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    // Best-effort save on close. Obsidian's onClose CANNOT veto the close, so we
+    // can't keep the leaf open if the save fails — save() surfaces a Notice on
+    // failure, and the (rare) non-atomic case where the vault write lands but
+    // the target write fails leaves that Notice as the signal. We deliberately
+    // keep the Save option here rather than degrading to discard-only, since a
+    // discard-only close would *guarantee* losing the edits.
     if (this.isDirty) {
       await this.promptDirtyResolve();
     }
@@ -109,9 +115,9 @@ export class CompareView extends ItemView {
       if (!resolved) return;
     }
 
-    this.relPath = relPath;
-    this.isDirty = false;
-
+    // Load into locals first; only commit relPath/buffers/dirty AFTER the read
+    // succeeds, so a failed load can't leave the new path paired with the old
+    // buffers (a later save would write stale content to the wrong file).
     let data;
     try {
       data = await this.actions.getDiffData(relPath);
@@ -120,8 +126,10 @@ export class CompareView extends ItemView {
       return;
     }
 
+    this.relPath = relPath;
     this.leftBuffer = data.vault;
     this.rightBuffer = data.target ?? "";
+    this.isDirty = false;
     this.initialized = true;
     this.renderCurrent();
   }

@@ -72,33 +72,7 @@
   padding: 2px 8px;
 }
 
-/* ---- Diff modal ---- */
-.gatekeeper-diff-note {
-  color: var(--text-accent);
-  font-size: var(--font-ui-small);
-}
-.gatekeeper-diff-pre {
-  max-height: 60vh;
-  overflow: auto;
-  background: var(--background-secondary);
-  padding: 8px;
-  border-radius: var(--radius-s);
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-small);
-  white-space: pre-wrap;
-}
-.gatekeeper-diff-pre > div {
-  padding: 0 4px;
-}
-.gatekeeper-line-added {
-  background: rgba(68, 207, 110, 0.18);
-}
-.gatekeeper-line-removed {
-  background: rgba(224, 70, 70, 0.18);
-}
-.gatekeeper-line-context {
-  color: var(--text-muted);
-}
+/* ---- Modal button row (used by the compare view's dirty-resolve modal) ---- */
 .gatekeeper-diff-buttons {
   display: flex;
   gap: 8px;

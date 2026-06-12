@@ -249,6 +249,40 @@ describe("applyHunkToLeft", () => {
 });
 
 // ---------------------------------------------------------------------------
+// apply with context-bearing hunks (must not delete surrounding context)
+// ---------------------------------------------------------------------------
+
+describe("applyHunkToRight / applyHunkToLeft with context lines", () => {
+  // computeHunks default contextLines=3 → a 5-line file's single change yields
+  // one hunk spanning all lines (context a,b + change + context d,e).
+  const target = "a\nb\nOLD\nd\ne";
+  const vault = "a\nb\nNEW\nd\ne";
+
+  it("accept preserves the hunk's surrounding context lines", () => {
+    const h = computeHunks(target, vault)[0];
+    expect(h.lines.some((l) => l.type === "context")).toBe(true);
+    expect(applyHunkToRight(target.split("\n"), h)).toEqual([
+      "a",
+      "b",
+      "NEW",
+      "d",
+      "e",
+    ]);
+  });
+
+  it("revert preserves the hunk's surrounding context lines", () => {
+    const h = computeHunks(target, vault)[0];
+    expect(applyHunkToLeft(vault.split("\n"), h)).toEqual([
+      "a",
+      "b",
+      "OLD",
+      "d",
+      "e",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // computeHunks (convenience wrapper)
 // ---------------------------------------------------------------------------
 

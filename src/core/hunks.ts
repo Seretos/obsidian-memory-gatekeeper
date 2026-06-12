@@ -138,32 +138,47 @@ export function groupHunks(
 }
 
 /**
- * Accept a hunk in the direction vault ← target: copy the target (removed)
- * lines from the hunk into the vault buffer, replacing the vault (added) lines.
- * Returns a new array — the input is not mutated.
+ * Apply a hunk in the direction vault ← target (revert): replace the vault's
+ * region [startAfter, endAfter) with the target's projection of the hunk — its
+ * context AND removed lines, in order. Returns a new array (input not mutated).
+ *
+ * Using the full before-projection (not just the removed lines) means the
+ * replaced window's own context lines are preserved, so the helper is correct
+ * for hunks WITH surrounding context too, not only 0-context segment hunks.
  */
 export function applyHunkToLeft(vaultLines: string[], hunk: Hunk): string[] {
-  // The "removed" lines in the hunk are the target's lines.
-  const targetLines = hunk.lines
-    .filter((l) => l.type === "removed")
+  // Target's view of the window = everything that is NOT vault-only (added).
+  const beforeProjection = hunk.lines
+    .filter((l) => l.type !== "added")
     .map((l) => l.text);
   const result = [...vaultLines];
-  result.splice(hunk.startAfter, hunk.endAfter - hunk.startAfter, ...targetLines);
+  result.splice(
+    hunk.startAfter,
+    hunk.endAfter - hunk.startAfter,
+    ...beforeProjection,
+  );
   return result;
 }
 
 /**
- * Accept a hunk in the direction vault → target: copy the vault (added)
- * lines from the hunk into the target buffer, replacing the target (removed) lines.
- * Returns a new array — the input is not mutated.
+ * Apply a hunk in the direction vault → target (accept): replace the target's
+ * region [startBefore, endBefore) with the vault's projection of the hunk — its
+ * context AND added lines, in order. Returns a new array (input not mutated).
+ *
+ * Using the full after-projection (not just the added lines) preserves the
+ * window's context lines, so this is correct for context-bearing hunks too.
  */
 export function applyHunkToRight(targetLines: string[], hunk: Hunk): string[] {
-  // The "added" lines in the hunk are the vault's lines.
-  const vaultLines = hunk.lines
-    .filter((l) => l.type === "added")
+  // Vault's view of the window = everything that is NOT target-only (removed).
+  const afterProjection = hunk.lines
+    .filter((l) => l.type !== "removed")
     .map((l) => l.text);
   const result = [...targetLines];
-  result.splice(hunk.startBefore, hunk.endBefore - hunk.startBefore, ...vaultLines);
+  result.splice(
+    hunk.startBefore,
+    hunk.endBefore - hunk.startBefore,
+    ...afterProjection,
+  );
   return result;
 }
 
