@@ -47,8 +47,18 @@ jobs:
       - name: Stamp versions.json
         run: |
           MIN=$(jq -r '.minAppVersion' manifest.json)
-          jq --arg v "$VERSION" --arg m "$MIN" '. + {($v): $m}' versions.json > tmp.json
-          mv tmp.json versions.json
+          # versions.json accumulates the real release history on the orphan
+          # `release` branch — main is never written back, and the in-repo
+          # versions.json is only a placeholder. Seed from the existing release
+          # branch if it exists, otherwise start empty, so only versions that
+          # were actually released are recorded (never the placeholder).
+          if git fetch origin release 2>/dev/null && git cat-file -e origin/release:versions.json 2>/dev/null; then
+            git show origin/release:versions.json > base_versions.json
+          else
+            echo '{}' > base_versions.json
+          fi
+          jq --arg v "$VERSION" --arg m "$MIN" '. + {($v): $m}' base_versions.json > versions.json
+          rm -f base_versions.json
 
       - name: Install dependencies
         run: npm ci
