@@ -186,24 +186,66 @@ function joinLines(lines: string[], trailingNewline: boolean): string {
 }
 
 /**
- * Apply a hunk to the vault text in the direction vault ← target (revert),
- * preserving the vault text's trailing-newline state. String-level wrapper
- * around applyHunkToLeft that uses the diff's line model — callers should use
- * this instead of hand-rolling split("\n")/join("\n").
+ * Decide the trailing-newline state of an apply result. The line-diff model
+ * discards each side's terminal newline, so we restore it explicitly: if the
+ * applied hunk reaches the END of the destination (its last line was replaced),
+ * the new tail comes from the source side, so the result follows the SOURCE's
+ * EOF-newline state; otherwise the destination's unchanged tail keeps the
+ * DESTINATION's state.
  */
-export function applyHunkToVaultText(vaultText: string, hunk: Hunk): string {
-  const { lines, trailingNewline } = splitLines(vaultText);
-  return joinLines(applyHunkToLeft(lines, hunk), trailingNewline);
+function resultTrailingNewline(
+  hunkEndInDest: number,
+  destLineCount: number,
+  destEol: boolean,
+  srcEol: boolean,
+): boolean {
+  return hunkEndInDest >= destLineCount ? srcEol : destEol;
 }
 
 /**
- * Apply a hunk to the target text in the direction vault → target (accept),
- * preserving the target text's trailing-newline state. String-level wrapper
- * around applyHunkToRight.
+ * Apply a hunk to the vault text in the direction vault ← target (revert):
+ * the vault region is replaced by the target's lines. Uses the diff's line
+ * model and restores the correct trailing newline — when the hunk reaches EOF
+ * the result follows the target (source) side, so the reverted region is
+ * byte-identical to the target. Callers should use this instead of hand-rolling
+ * split("\n")/join("\n").
  */
-export function applyHunkToTargetText(targetText: string, hunk: Hunk): string {
-  const { lines, trailingNewline } = splitLines(targetText);
-  return joinLines(applyHunkToRight(lines, hunk), trailingNewline);
+export function applyHunkToVaultText(
+  vaultText: string,
+  targetText: string,
+  hunk: Hunk,
+): string {
+  const dest = splitLines(vaultText);
+  const src = splitLines(targetText);
+  const eol = resultTrailingNewline(
+    hunk.endAfter,
+    dest.lines.length,
+    dest.trailingNewline,
+    src.trailingNewline,
+  );
+  return joinLines(applyHunkToLeft(dest.lines, hunk), eol);
+}
+
+/**
+ * Apply a hunk to the target text in the direction vault → target (accept):
+ * the target region is replaced by the vault's lines. When the hunk reaches EOF
+ * the result follows the vault (source) side, so the accepted region is
+ * byte-identical to the vault.
+ */
+export function applyHunkToTargetText(
+  targetText: string,
+  vaultText: string,
+  hunk: Hunk,
+): string {
+  const dest = splitLines(targetText);
+  const src = splitLines(vaultText);
+  const eol = resultTrailingNewline(
+    hunk.endBefore,
+    dest.lines.length,
+    dest.trailingNewline,
+    src.trailingNewline,
+  );
+  return joinLines(applyHunkToRight(dest.lines, hunk), eol);
 }
 
 /**

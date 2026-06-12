@@ -281,9 +281,9 @@
   min-width: 0;
   padding: 8px 10px;
 }
-.gatekeeper-change-cell + .gatekeeper-change-cell {
-  border-left: 1px solid var(--background-modifier-border);
-}
+/* No extra column separator here: the removed cell's own dashed left bar (below)
+   already divides the columns. A `.cell + .cell { border-left }` rule would
+   out-specify and hide that dashed marker — the key non-color cue. */
 /* Added (vault/new): solid green left bar + light fill.
    Removed (memory/old): dashed red left bar + light fill.
    Solid-vs-dashed bar and the "+"/"−" labels carry the meaning without hue. */

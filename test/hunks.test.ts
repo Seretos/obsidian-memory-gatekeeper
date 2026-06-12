@@ -363,36 +363,38 @@ describe("buildDiffSegments", () => {
 // ---------------------------------------------------------------------------
 
 describe("applyHunkToTargetText / applyHunkToVaultText", () => {
-  const firstHunk = (before: string, after: string): Hunk =>
-    computeHunks(before, after, 0)[0];
+  // computeHunks(before=target, after=vault); the apply wrappers take
+  // (destText, sourceText, hunk).
+  const firstHunk = (target: string, vault: string): Hunk =>
+    computeHunks(target, vault, 0)[0];
 
   it("accept: substitutes the hunk, preserving a trailing newline", () => {
     const target = "a\nOLD\nc\n";
     const vault = "a\nNEW\nc\n";
     const h = firstHunk(target, vault);
-    expect(applyHunkToTargetText(target, h)).toBe("a\nNEW\nc\n");
+    expect(applyHunkToTargetText(target, vault, h)).toBe("a\nNEW\nc\n");
   });
 
   it("accept: preserves absence of a trailing newline", () => {
     const target = "a\nOLD\nc";
     const vault = "a\nNEW\nc";
     const h = firstHunk(target, vault);
-    expect(applyHunkToTargetText(target, h)).toBe("a\nNEW\nc");
+    expect(applyHunkToTargetText(target, vault, h)).toBe("a\nNEW\nc");
   });
 
   it("revert: restores the target lines into the vault buffer", () => {
     const target = "a\nOLD\nc\n";
     const vault = "a\nNEW\nc\n";
     const h = firstHunk(target, vault);
-    expect(applyHunkToVaultText(vault, h)).toBe("a\nOLD\nc\n");
+    expect(applyHunkToVaultText(vault, target, h)).toBe("a\nOLD\nc\n");
   });
 
   it("handles an edit on the final line of a newline-terminated file", () => {
     const target = "a\nb\nOLD\n";
     const vault = "a\nb\nNEW\n";
     const h = firstHunk(target, vault);
-    expect(applyHunkToTargetText(target, h)).toBe("a\nb\nNEW\n");
-    expect(applyHunkToVaultText(vault, h)).toBe("a\nb\nOLD\n");
+    expect(applyHunkToTargetText(target, vault, h)).toBe("a\nb\nNEW\n");
+    expect(applyHunkToVaultText(vault, target, h)).toBe("a\nb\nOLD\n");
   });
 
   it("handles a pure deletion at EOF, keeping the trailing newline", () => {
@@ -400,21 +402,32 @@ describe("applyHunkToTargetText / applyHunkToVaultText", () => {
     const vault = "a\nb\n";
     const h = firstHunk(target, vault);
     // accept vault → target removes the GONE line
-    expect(applyHunkToTargetText(target, h)).toBe("a\nb\n");
+    expect(applyHunkToTargetText(target, vault, h)).toBe("a\nb\n");
   });
 
   it("handles a pure insertion at EOF without a trailing newline", () => {
     const target = "a\nb";
     const vault = "a\nb\nNEW";
     const h = firstHunk(target, vault);
-    expect(applyHunkToTargetText(target, h)).toBe("a\nb\nNEW");
+    expect(applyHunkToTargetText(target, vault, h)).toBe("a\nb\nNEW");
   });
 
-  it("does not mutate the input text's array (returns a fresh string)", () => {
+  it("adopts the SOURCE side's EOF newline when the hunk reaches the end", () => {
+    // target has no trailing newline, vault does. Accepting vault must produce
+    // bytes identical to vault's region, i.e. WITH the trailing newline.
+    const target = "a\nOLD";
+    const vault = "a\nNEW\n";
+    const h = firstHunk(target, vault);
+    expect(applyHunkToTargetText(target, vault, h)).toBe("a\nNEW\n");
+    // ...and reverting adopts the target (source for revert) side: no newline.
+    expect(applyHunkToVaultText(vault, target, h)).toBe("a\nOLD");
+  });
+
+  it("does not mutate the input text (returns a fresh string)", () => {
     const target = "a\nOLD\nc";
     const vault = "a\nNEW\nc";
     const h = firstHunk(target, vault);
-    const out = applyHunkToTargetText(target, h);
+    const out = applyHunkToTargetText(target, vault, h);
     expect(out).not.toBe(target);
     expect(target).toBe("a\nOLD\nc");
   });

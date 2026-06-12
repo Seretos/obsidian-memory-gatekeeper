@@ -79,9 +79,10 @@ export class CompareView extends ItemView {
 
   async onClose(): Promise<void> {
     if (this.isDirty) {
-      await this.promptDirtyClose();
+      await this.promptDirtyResolve();
     }
     this.tearDownEditor();
+    this.disposeRenderScope();
   }
 
   // Obsidian calls setState when a leaf is opened with a known state
@@ -94,11 +95,16 @@ export class CompareView extends ItemView {
     const relPath = typeof state["relPath"] === "string" ? state["relPath"] : "";
     if (!relPath) return;
 
-    // Guard against clobbering unsaved edits: a redundant setState for the file
-    // we already hold (e.g. a workspace layout change) must not silently reload
-    // from disk and drop the user's in-progress changes.
-    if (this.initialized && relPath === this.relPath && this.isDirty) {
-      return;
+    // Guard against clobbering unsaved edits.
+    if (this.initialized && this.isDirty) {
+      if (relPath === this.relPath) {
+        // Redundant setState for the file we already hold (e.g. a workspace
+        // layout change): keep the live buffers, don't reload from disk.
+        return;
+      }
+      // A different file is being loaded over unsaved edits — resolve them
+      // (save or discard) before overwriting, rather than dropping them silently.
+      await this.promptDirtyResolve();
     }
 
     this.relPath = relPath;
@@ -311,7 +317,11 @@ export class CompareView extends ItemView {
       "Vault-Version (links) in Memory übernehmen",
     );
     acceptBtn.onclick = () => {
-      this.rightBuffer = applyHunkToTargetText(this.rightBuffer, seg.hunk);
+      this.rightBuffer = applyHunkToTargetText(
+        this.rightBuffer,
+        this.leftBuffer,
+        seg.hunk,
+      );
       this.isDirty = true;
       void this.renderCompareMode();
     };
@@ -324,7 +334,11 @@ export class CompareView extends ItemView {
       "Memory-Version (rechts) in Vault übernehmen — Vault-Änderung verwerfen",
     );
     revertBtn.onclick = () => {
-      this.leftBuffer = applyHunkToVaultText(this.leftBuffer, seg.hunk);
+      this.leftBuffer = applyHunkToVaultText(
+        this.leftBuffer,
+        this.rightBuffer,
+        seg.hunk,
+      );
       this.isDirty = true;
       void this.renderCompareMode();
     };
@@ -404,13 +418,19 @@ export class CompareView extends ItemView {
   // Dirty-close guard
   // -------------------------------------------------------------------------
 
-  private async promptDirtyClose(): Promise<void> {
-    // NOTE: Obsidian's ItemView.onClose cannot veto the close — the leaf is torn
-    // down regardless of what this promise resolves to. So the prompt only
-    // offers Save (write before the view goes away) or Discard; there is no
-    // honest "Cancel" that keeps the view open, so we don't pretend to offer one.
+  /**
+   * Resolve unsaved edits (save or discard) before they would be lost — used
+   * both when the view is closing and when setState loads a different file over
+   * a dirty buffer.
+   *
+   * NOTE on close: Obsidian's ItemView.onClose cannot veto the close — the leaf
+   * is torn down regardless of what this resolves to. So we only offer Save
+   * (write before the view goes away) or Discard; there is no honest "Cancel"
+   * that keeps the view open, so we don't pretend to offer one.
+   */
+  private async promptDirtyResolve(): Promise<void> {
     return new Promise((resolve) => {
-      const modal = new DirtyCloseModal(
+      const modal = new DirtyResolveModal(
         this.app,
         async (action) => {
           if (action === "save") {
@@ -451,7 +471,7 @@ export class CompareView extends ItemView {
 // Dirty-close modal
 // ---------------------------------------------------------------------------
 
-class DirtyCloseModal extends Modal {
+class DirtyResolveModal extends Modal {
   constructor(
     app: App,
     private onAction: (action: "save" | "discard") => Promise<void>,
@@ -463,14 +483,14 @@ class DirtyCloseModal extends Modal {
     const { contentEl, titleEl } = this;
     titleEl.setText("Unsaved changes");
     contentEl.createEl("p", {
-      text: "This compare view has unsaved changes and is closing. Save them before it closes?",
+      text: "This compare view has unsaved changes. Save them before continuing?",
     });
 
     const buttons = contentEl.createDiv({ cls: "gatekeeper-diff-buttons" });
 
     const saveBtn = buttons.createEl("button", {
       cls: "mod-cta",
-      text: "Save & close",
+      text: "Save changes",
     });
     saveBtn.onclick = async () => {
       this.close();
@@ -478,7 +498,7 @@ class DirtyCloseModal extends Modal {
     };
 
     const discardBtn = buttons.createEl("button", {
-      text: "Discard & close",
+      text: "Discard changes",
     });
     discardBtn.onclick = async () => {
       this.close();
