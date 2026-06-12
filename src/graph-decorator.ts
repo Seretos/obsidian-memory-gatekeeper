@@ -1,10 +1,10 @@
 import { App, WorkspaceLeaf } from "obsidian";
 import type { StatusStore } from "./status-store";
-
-interface ColorGroup {
-  query: string;
-  color: { a: number; rgb: number };
-}
+import {
+  buildColorGroups,
+  colorGroupSignature,
+  type ColorGroup,
+} from "./core/color-groups";
 
 interface GraphEngine {
   getOptions(): { colorGroups?: ColorGroup[] } & Record<string, unknown>;
@@ -83,19 +83,10 @@ export class GraphDecorator {
   }
 
   private desiredGroups(): ColorGroup[] {
-    const entries = this.store.all();
-    const groups: ColorGroup[] = [];
-    const build = (status: "new" | "modified", rgb: number) => {
-      const paths = entries
-        .filter((e) => e.status === status)
-        .map((e) => `path:"${e.relPath}"`);
-      if (paths.length) {
-        groups.push({ query: paths.join(" OR "), color: { a: 1, rgb } });
-      }
-    };
-    build("new", GraphDecorator.COLOR_NEW);
-    build("modified", GraphDecorator.COLOR_MODIFIED);
-    return groups;
+    return buildColorGroups(this.store.all(), {
+      newColor: GraphDecorator.COLOR_NEW,
+      modifiedColor: GraphDecorator.COLOR_MODIFIED,
+    });
   }
 
   private applyToLeaf(leaf: WorkspaceLeaf, desired: ColorGroup[]): void {
@@ -108,19 +99,14 @@ export class GraphDecorator {
       GraphDecorator.RESERVED.includes(g.color?.rgb);
 
     // Skip if our reserved groups already match — avoids needless re-render.
-    if (this.signature(existing.filter(ours)) === this.signature(desired)) {
+    if (
+      colorGroupSignature(existing.filter(ours)) === colorGroupSignature(desired)
+    ) {
       return;
     }
 
     opts.colorGroups = [...existing.filter((g) => !ours(g)), ...desired];
     engine.setOptions(opts);
     engine.render?.();
-  }
-
-  private signature(groups: ColorGroup[]): string {
-    return groups
-      .map((g) => `${g.color?.rgb}:${g.query}`)
-      .sort()
-      .join("|");
   }
 }

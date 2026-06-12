@@ -1,19 +1,10 @@
 import { App, EventRef, normalizePath, TAbstractFile, TFile } from "obsidian";
-import { createHash } from "crypto";
 import { promises as fsp } from "fs";
 import * as fs from "fs";
 import * as path from "path";
 import { StatusStore } from "./status-store";
-import type {
-  DiffData,
-  DivergentEntry,
-  FileStatus,
-  GatekeeperSettings,
-} from "./types";
-
-function sha1(content: string): string {
-  return createHash("sha1").update(content).digest("hex");
-}
+import { classify, hashContent } from "./core/compare";
+import type { DiffData, DivergentEntry, GatekeeperSettings } from "./types";
 
 /**
  * Compares each vault file against the same relative path under the target
@@ -120,14 +111,10 @@ export class ComparisonEngine {
     for (const file of files) {
       const relPath = file.path;
       const vaultContent = await this.app.vault.adapter.read(relPath);
-      const vaultHash = sha1(vaultContent);
+      const vaultHash = hashContent(vaultContent);
       const targetContent = await this.readTarget(relPath);
 
-      let status: FileStatus;
-      if (targetContent === null) status = "new";
-      else if (targetContent !== vaultContent) status = "modified";
-      else status = "identical";
-
+      const status = classify(vaultContent, targetContent);
       if (status === "identical") continue;
 
       const entry: DivergentEntry = { relPath, status, vaultHash };

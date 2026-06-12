@@ -1,6 +1,12 @@
 import { App, Modal, Notice } from "obsidian";
-import { diffLines } from "diff";
+import { computeDiffLines, linePrefix } from "./core/diff-lines";
 import type { GatekeeperActions } from "./types";
+
+const LINE_CLASS = {
+  added: "gatekeeper-line-added",
+  removed: "gatekeeper-line-removed",
+  context: "gatekeeper-line-context",
+} as const;
 
 /**
  * Whole-file diff (vertical slice 1). Shows the line diff between the vault
@@ -41,18 +47,11 @@ export class DiffModal extends Modal {
     }
 
     const pre = body.createEl("pre", { cls: "gatekeeper-diff-pre" });
-    const parts = diffLines(data.target ?? "", data.vault);
-    for (const part of parts) {
-      const cls = part.added
-        ? "gatekeeper-line-added"
-        : part.removed
-          ? "gatekeeper-line-removed"
-          : "gatekeeper-line-context";
-      const prefix = part.added ? "+ " : part.removed ? "- " : "  ";
-      // diff parts can span multiple lines; render each line with its marker.
-      for (const line of part.value.replace(/\n$/, "").split("\n")) {
-        pre.createDiv({ cls, text: prefix + line });
-      }
+    for (const line of computeDiffLines(data.target ?? "", data.vault)) {
+      pre.createDiv({
+        cls: LINE_CLASS[line.type],
+        text: linePrefix(line.type) + line.text,
+      });
     }
 
     const buttons = contentEl.createDiv({ cls: "gatekeeper-diff-buttons" });
