@@ -39,6 +39,13 @@ export class CompareView extends ItemView {
   private mode: CompareMode = "edit";
   /** True once buffers have been loaded from disk at least once. */
   private initialized = false;
+  /**
+   * Whether the target (memory) file existed when loaded. Distinguishes "no
+   * target file yet" (a new proposal) from "target file exists but is empty",
+   * so Save doesn't silently materialize an empty memory file for a proposal
+   * the user never put content into.
+   */
+  private targetExisted = false;
 
   /** Active MergeView instance (edit mode only). */
   private mergeView: MergeView | null = null;
@@ -129,6 +136,7 @@ export class CompareView extends ItemView {
     this.relPath = relPath;
     this.leftBuffer = data.vault;
     this.rightBuffer = data.target ?? "";
+    this.targetExisted = data.target !== null;
     this.isDirty = false;
     this.initialized = true;
     this.renderCurrent();
@@ -262,10 +270,14 @@ export class CompareView extends ItemView {
 
     // Fresh render scope: unload the previous one so its MarkdownRenderChild
     // instances are disposed instead of accumulating on the view across the
-    // repeated re-renders triggered by hunk accept/revert.
+    // repeated re-renders triggered by hunk accept/revert. Capture it locally —
+    // renderCompareMode is async and re-entrant, so a newer render can replace
+    // this.renderScope while this one is still awaiting; the captured `scope`
+    // lets each await-point detect that and bail (see renderMarkdownInto).
     this.disposeRenderScope();
-    this.renderScope = new Component();
-    this.addChild(this.renderScope);
+    const scope = new Component();
+    this.addChild(scope);
+    this.renderScope = scope;
 
     const root = this.contentArea.createDiv({
       cls: "gatekeeper-compare-rendered",
@@ -293,13 +305,16 @@ export class CompareView extends ItemView {
 
     let changeNo = 0;
     for (const seg of segments) {
+      // A newer render superseded this one (e.g. a rapid second hunk click) —
+      // stop before appending stale DOM/children.
+      if (this.renderScope !== scope) return;
       if (seg.type === "context") {
         // Unchanged prose, rendered once, full width.
         const ctx = root.createDiv({ cls: "gatekeeper-seg-context" });
-        await this.renderMarkdownInto(seg.lines.join("\n"), ctx);
+        await this.renderMarkdownInto(seg.lines.join("\n"), ctx, scope);
       } else {
         changeNo++;
-        await this.renderChangeSegment(root, seg, changeNo);
+        await this.renderChangeSegment(root, seg, changeNo, scope);
       }
     }
   }
@@ -309,6 +324,7 @@ export class CompareView extends ItemView {
     root: HTMLElement,
     seg: ChangeSegment,
     changeNo: number,
+    scope: Component,
   ): Promise<void> {
     const block = root.createDiv({ cls: "gatekeeper-change" });
 
@@ -362,7 +378,7 @@ export class CompareView extends ItemView {
     leftCell.createDiv({ cls: "gatekeeper-change-cell-label", text: "+ Vault (neu)" });
     const leftBody = leftCell.createDiv({ cls: "gatekeeper-change-cell-body" });
     if (seg.added.length > 0) {
-      await this.renderMarkdownInto(seg.added.join("\n"), leftBody);
+      await this.renderMarkdownInto(seg.added.join("\n"), leftBody, scope);
     } else {
       leftBody.createDiv({
         cls: "gatekeeper-change-empty",
@@ -376,7 +392,7 @@ export class CompareView extends ItemView {
     rightCell.createDiv({ cls: "gatekeeper-change-cell-label", text: "− Memory (alt)" });
     const rightBody = rightCell.createDiv({ cls: "gatekeeper-change-cell-body" });
     if (seg.removed.length > 0) {
-      await this.renderMarkdownInto(seg.removed.join("\n"), rightBody);
+      await this.renderMarkdownInto(seg.removed.join("\n"), rightBody, scope);
     } else {
       rightBody.createDiv({
         cls: "gatekeeper-change-empty",
@@ -385,18 +401,21 @@ export class CompareView extends ItemView {
     }
   }
 
-  /** Render a markdown fragment into `el` with Obsidian reading-view styling. */
-  private async renderMarkdownInto(md: string, el: HTMLElement): Promise<void> {
+  /**
+   * Render a markdown fragment into `el` with Obsidian reading-view styling,
+   * scoping the MarkdownRenderChild to the given render component (not the view)
+   * so it is unloaded on the next re-render. `scope` is the render-cycle's own
+   * component; if a newer render has replaced it we skip, so a stale in-flight
+   * render can't append children onto the current scope.
+   */
+  private async renderMarkdownInto(
+    md: string,
+    el: HTMLElement,
+    scope: Component,
+  ): Promise<void> {
+    if (this.renderScope !== scope) return;
     el.addClass("markdown-rendered");
-    // Scope the MarkdownRenderChild to the disposable render component, not the
-    // view, so it is unloaded on the next re-render.
-    await MarkdownRenderer.render(
-      this.app,
-      md,
-      el,
-      this.relPath,
-      this.renderScope ?? this,
-    );
+    await MarkdownRenderer.render(this.app, md, el, this.relPath, scope);
   }
 
   private disposeRenderScope(): void {
@@ -410,14 +429,23 @@ export class CompareView extends ItemView {
   // Save
   // -------------------------------------------------------------------------
 
-  /** Returns true only if both writes succeeded (dirty flag cleared). */
+  /** Returns true only if the write(s) succeeded (dirty flag cleared). */
   private async save(): Promise<boolean> {
     // Sync editor state to buffers first.
     this.syncBuffersFromEditor();
 
+    // Only materialize the target (memory) file if it already existed or the
+    // user actually put content on the right side. This avoids creating an
+    // empty memory file for a brand-new proposal that was never accepted.
+    const writeTarget = this.targetExisted || this.rightBuffer.length > 0;
+
     try {
       await this.actions.writeVault(this.relPath, this.leftBuffer);
-      await this.actions.writeTarget(this.relPath, this.rightBuffer);
+      if (writeTarget) {
+        await this.actions.writeTarget(this.relPath, this.rightBuffer);
+        // The target now exists on disk for subsequent saves.
+        this.targetExisted = true;
+      }
       this.isDirty = false;
       new Notice(`Saved: ${this.relPath}`);
       return true;
