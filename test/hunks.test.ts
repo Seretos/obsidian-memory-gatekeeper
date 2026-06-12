@@ -431,4 +431,23 @@ describe("applyHunkToTargetText / applyHunkToVaultText", () => {
     expect(out).not.toBe(target);
     expect(target).toBe("a\nOLD\nc");
   });
+
+  it("accepts a new multi-line file into an empty target (no phantom blank line)", () => {
+    const target = "";
+    const vault = "line1\nline2";
+    const h = firstHunk(target, vault);
+    expect(applyHunkToTargetText(target, vault, h)).toBe("line1\nline2");
+  });
+
+  it("accepts a new single-line file into an empty target", () => {
+    const h = firstHunk("", "NEW");
+    expect(applyHunkToTargetText("", "NEW", h)).toBe("NEW");
+  });
+
+  it("reverts a vault back to an empty target (clears to empty, not a blank line)", () => {
+    const target = "";
+    const vault = "line1\nline2";
+    const h = firstHunk(target, vault);
+    expect(applyHunkToVaultText(vault, target, h)).toBe("");
+  });
 });

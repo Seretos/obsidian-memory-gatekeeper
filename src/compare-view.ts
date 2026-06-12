@@ -103,8 +103,10 @@ export class CompareView extends ItemView {
         return;
       }
       // A different file is being loaded over unsaved edits — resolve them
-      // (save or discard) before overwriting, rather than dropping them silently.
-      await this.promptDirtyResolve();
+      // (save or discard) first. If the user dismissed the prompt or the save
+      // failed, abort the swap rather than dropping the edits on the floor.
+      const resolved = await this.promptDirtyResolve();
+      if (!resolved) return;
     }
 
     this.relPath = relPath;
@@ -400,7 +402,8 @@ export class CompareView extends ItemView {
   // Save
   // -------------------------------------------------------------------------
 
-  private async save(): Promise<void> {
+  /** Returns true only if both writes succeeded (dirty flag cleared). */
+  private async save(): Promise<boolean> {
     // Sync editor state to buffers first.
     this.syncBuffersFromEditor();
 
@@ -409,8 +412,10 @@ export class CompareView extends ItemView {
       await this.actions.writeTarget(this.relPath, this.rightBuffer);
       this.isDirty = false;
       new Notice(`Saved: ${this.relPath}`);
+      return true;
     } catch (e) {
       new Notice(`Save failed: ${(e as Error).message}`);
+      return false;
     }
   }
 
@@ -421,23 +426,24 @@ export class CompareView extends ItemView {
   /**
    * Resolve unsaved edits (save or discard) before they would be lost — used
    * both when the view is closing and when setState loads a different file over
-   * a dirty buffer.
+   * a dirty buffer. Resolves `true` when the edits are settled (saved OK or
+   * explicitly discarded) and `false` when not (a failed save, or the modal was
+   * dismissed via Esc/backdrop) so callers can avoid clobbering the buffer.
    *
    * NOTE on close: Obsidian's ItemView.onClose cannot veto the close — the leaf
    * is torn down regardless of what this resolves to. So we only offer Save
    * (write before the view goes away) or Discard; there is no honest "Cancel"
    * that keeps the view open, so we don't pretend to offer one.
    */
-  private async promptDirtyResolve(): Promise<void> {
+  private async promptDirtyResolve(): Promise<boolean> {
     return new Promise((resolve) => {
       const modal = new DirtyResolveModal(
         this.app,
         async (action) => {
-          if (action === "save") {
-            await this.save();
-          }
-          resolve();
+          // "save" only counts as resolved if the write actually succeeded.
+          resolve(action === "save" ? await this.save() : true);
         },
+        () => resolve(false), // dismissed without choosing (Esc / click-away)
       );
       modal.open();
     });
@@ -472,9 +478,14 @@ export class CompareView extends ItemView {
 // ---------------------------------------------------------------------------
 
 class DirtyResolveModal extends Modal {
+  /** Set once a button is chosen, so onClose can tell a real choice from a
+   *  dismissal (Esc / backdrop click) and never double-resolve the promise. */
+  private actionChosen = false;
+
   constructor(
     app: App,
     private onAction: (action: "save" | "discard") => Promise<void>,
+    private onDismiss: () => void,
   ) {
     super(app);
   }
@@ -493,6 +504,7 @@ class DirtyResolveModal extends Modal {
       text: "Save changes",
     });
     saveBtn.onclick = async () => {
+      this.actionChosen = true;
       this.close();
       await this.onAction("save");
     };
@@ -501,6 +513,7 @@ class DirtyResolveModal extends Modal {
       text: "Discard changes",
     });
     discardBtn.onclick = async () => {
+      this.actionChosen = true;
       this.close();
       await this.onAction("discard");
     };
@@ -508,5 +521,8 @@ class DirtyResolveModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+    // Dismissed via Esc or clicking the backdrop — signal the caller so its
+    // awaited promise resolves instead of hanging forever.
+    if (!this.actionChosen) this.onDismiss();
   }
 }

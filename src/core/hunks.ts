@@ -167,22 +167,28 @@ export function applyHunkToRight(targetLines: string[], hunk: Hunk): string[] {
   return result;
 }
 
-/**
- * Split text into the SAME line model the diff/hunk indices use.
- *
- * `computeDiffLines` strips a single trailing newline before splitting, so a
- * buffer ending in "\n" yields N lines, not N+1 with a phantom empty line.
- * Applying hunks with a naive `text.split("\n")` therefore misaligns indices
- * around EOF and loses the file's final-newline state on `join`. These helpers
- * split/join consistently and preserve whether the text ended with a newline.
- */
-function splitLines(text: string): { lines: string[]; trailingNewline: boolean } {
-  const trailingNewline = /\n$/.test(text);
-  return { lines: text.replace(/\n$/, "").split("\n"), trailingNewline };
-}
+const hasTrailingNewline = (text: string): boolean => /\n$/.test(text);
 
-function joinLines(lines: string[], trailingNewline: boolean): string {
-  return lines.join("\n") + (trailingNewline ? "\n" : "");
+/**
+ * The exact before/after line arrays that the hunk indices reference — derived
+ * from the SAME computeDiffLines pass that produced the hunks (before lines =
+ * context+removed, after lines = context+added). Re-splitting a buffer with
+ * `text.split("\n")` does NOT reproduce this: it disagrees on trailing-newline
+ * count and, worse, on empty strings (computeDiffLines models "" against a
+ * non-empty side as ZERO lines, while "".split("\n") is one phantom [""]).
+ * Splicing into this model keeps apply byte-correct in those edge cases.
+ */
+function diffLineModel(
+  before: string,
+  after: string,
+): { beforeLines: string[]; afterLines: string[] } {
+  const beforeLines: string[] = [];
+  const afterLines: string[] = [];
+  for (const line of computeDiffLines(before, after)) {
+    if (line.type !== "added") beforeLines.push(line.text);
+    if (line.type !== "removed") afterLines.push(line.text);
+  }
+  return { beforeLines, afterLines };
 }
 
 /**
@@ -193,37 +199,38 @@ function joinLines(lines: string[], trailingNewline: boolean): string {
  * EOF-newline state; otherwise the destination's unchanged tail keeps the
  * DESTINATION's state.
  */
-function resultTrailingNewline(
+function joinWithEol(
+  lines: string[],
   hunkEndInDest: number,
   destLineCount: number,
   destEol: boolean,
   srcEol: boolean,
-): boolean {
-  return hunkEndInDest >= destLineCount ? srcEol : destEol;
+): string {
+  const eol = hunkEndInDest >= destLineCount ? srcEol : destEol;
+  return lines.join("\n") + (eol ? "\n" : "");
 }
 
 /**
  * Apply a hunk to the vault text in the direction vault ← target (revert):
- * the vault region is replaced by the target's lines. Uses the diff's line
- * model and restores the correct trailing newline — when the hunk reaches EOF
- * the result follows the target (source) side, so the reverted region is
- * byte-identical to the target. Callers should use this instead of hand-rolling
- * split("\n")/join("\n").
+ * the vault region is replaced by the target's lines. Operates on the diff's
+ * own line model (consistent with the hunk indices, including empty-buffer and
+ * trailing-newline edge cases) and, when the hunk reaches EOF, follows the
+ * target (source) side so the reverted region is byte-identical to the target.
+ * Callers should use this instead of hand-rolling split("\n")/join("\n").
  */
 export function applyHunkToVaultText(
   vaultText: string,
   targetText: string,
   hunk: Hunk,
 ): string {
-  const dest = splitLines(vaultText);
-  const src = splitLines(targetText);
-  const eol = resultTrailingNewline(
+  const { afterLines } = diffLineModel(targetText, vaultText);
+  return joinWithEol(
+    applyHunkToLeft(afterLines, hunk),
     hunk.endAfter,
-    dest.lines.length,
-    dest.trailingNewline,
-    src.trailingNewline,
+    afterLines.length,
+    hasTrailingNewline(vaultText),
+    hasTrailingNewline(targetText),
   );
-  return joinLines(applyHunkToLeft(dest.lines, hunk), eol);
 }
 
 /**
@@ -237,15 +244,14 @@ export function applyHunkToTargetText(
   vaultText: string,
   hunk: Hunk,
 ): string {
-  const dest = splitLines(targetText);
-  const src = splitLines(vaultText);
-  const eol = resultTrailingNewline(
+  const { beforeLines } = diffLineModel(targetText, vaultText);
+  return joinWithEol(
+    applyHunkToRight(beforeLines, hunk),
     hunk.endBefore,
-    dest.lines.length,
-    dest.trailingNewline,
-    src.trailingNewline,
+    beforeLines.length,
+    hasTrailingNewline(targetText),
+    hasTrailingNewline(vaultText),
   );
-  return joinLines(applyHunkToRight(dest.lines, hunk), eol);
 }
 
 /**
