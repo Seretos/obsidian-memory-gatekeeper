@@ -1,5 +1,6 @@
 import {
   App,
+  Component,
   ItemView,
   MarkdownRenderer,
   Modal,
@@ -12,8 +13,8 @@ import { EditorView } from "@codemirror/view";
 import { COMPARE_VIEW_TYPE, type GatekeeperActions } from "./types";
 import {
   buildDiffSegments,
-  applyHunkToLeft,
-  applyHunkToRight,
+  applyHunkToVaultText,
+  applyHunkToTargetText,
   type ChangeSegment,
 } from "./core/hunks";
 
@@ -36,11 +37,19 @@ export class CompareView extends ItemView {
   private rightBuffer = ""; // target content (editable)
   private isDirty = false;
   private mode: CompareMode = "edit";
+  /** True once buffers have been loaded from disk at least once. */
+  private initialized = false;
 
   /** Active MergeView instance (edit mode only). */
   private mergeView: MergeView | null = null;
   /** DOM container for the editor/compare area that gets torn down/rebuilt. */
   private contentArea: HTMLElement | null = null;
+  /**
+   * Disposable child component scoping the MarkdownRenderChild instances created
+   * for the current compare-mode render. Unloaded and recreated on every
+   * re-render so rendered-markdown children don't accumulate on the view.
+   */
+  private renderScope: Component | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -84,6 +93,14 @@ export class CompareView extends ItemView {
     await super.setState(state, result);
     const relPath = typeof state["relPath"] === "string" ? state["relPath"] : "";
     if (!relPath) return;
+
+    // Guard against clobbering unsaved edits: a redundant setState for the file
+    // we already hold (e.g. a workspace layout change) must not silently reload
+    // from disk and drop the user's in-progress changes.
+    if (this.initialized && relPath === this.relPath && this.isDirty) {
+      return;
+    }
+
     this.relPath = relPath;
     this.isDirty = false;
 
@@ -97,6 +114,7 @@ export class CompareView extends ItemView {
 
     this.leftBuffer = data.vault;
     this.rightBuffer = data.target ?? "";
+    this.initialized = true;
     this.renderCurrent();
   }
 
@@ -159,6 +177,7 @@ export class CompareView extends ItemView {
 
   private renderCurrent(): void {
     this.tearDownEditor();
+    this.disposeRenderScope();
     if (!this.contentArea) return;
     this.contentArea.empty();
 
@@ -225,6 +244,13 @@ export class CompareView extends ItemView {
     // called from hunk-apply onclick handlers).
     this.contentArea.empty();
 
+    // Fresh render scope: unload the previous one so its MarkdownRenderChild
+    // instances are disposed instead of accumulating on the view across the
+    // repeated re-renders triggered by hunk accept/revert.
+    this.disposeRenderScope();
+    this.renderScope = new Component();
+    this.addChild(this.renderScope);
+
     const root = this.contentArea.createDiv({
       cls: "gatekeeper-compare-rendered",
     });
@@ -249,12 +275,6 @@ export class CompareView extends ItemView {
       });
     }
 
-    // NOTE: MarkdownRenderer.render registers MarkdownRenderChild instances on
-    // `this` (the Component). Those children accumulate across re-renders because
-    // there is no public API to selectively unload them without unloading the
-    // whole view. The practical leak is minor (inactive event listeners on
-    // replaced DOM nodes), and fixing it cleanly would require a scoped sub-
-    // Component per render cycle — complexity not warranted at this stage.
     let changeNo = 0;
     for (const seg of segments) {
       if (seg.type === "context") {
@@ -291,10 +311,7 @@ export class CompareView extends ItemView {
       "Vault-Version (links) in Memory übernehmen",
     );
     acceptBtn.onclick = () => {
-      this.rightBuffer = applyHunkToRight(
-        this.rightBuffer.split("\n"),
-        seg.hunk,
-      ).join("\n");
+      this.rightBuffer = applyHunkToTargetText(this.rightBuffer, seg.hunk);
       this.isDirty = true;
       void this.renderCompareMode();
     };
@@ -307,10 +324,7 @@ export class CompareView extends ItemView {
       "Memory-Version (rechts) in Vault übernehmen — Vault-Änderung verwerfen",
     );
     revertBtn.onclick = () => {
-      this.leftBuffer = applyHunkToLeft(
-        this.leftBuffer.split("\n"),
-        seg.hunk,
-      ).join("\n");
+      this.leftBuffer = applyHunkToVaultText(this.leftBuffer, seg.hunk);
       this.isDirty = true;
       void this.renderCompareMode();
     };
@@ -350,7 +364,22 @@ export class CompareView extends ItemView {
   /** Render a markdown fragment into `el` with Obsidian reading-view styling. */
   private async renderMarkdownInto(md: string, el: HTMLElement): Promise<void> {
     el.addClass("markdown-rendered");
-    await MarkdownRenderer.render(this.app, md, el, this.relPath, this);
+    // Scope the MarkdownRenderChild to the disposable render component, not the
+    // view, so it is unloaded on the next re-render.
+    await MarkdownRenderer.render(
+      this.app,
+      md,
+      el,
+      this.relPath,
+      this.renderScope ?? this,
+    );
+  }
+
+  private disposeRenderScope(): void {
+    if (this.renderScope) {
+      this.removeChild(this.renderScope);
+      this.renderScope = null;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -376,6 +405,10 @@ export class CompareView extends ItemView {
   // -------------------------------------------------------------------------
 
   private async promptDirtyClose(): Promise<void> {
+    // NOTE: Obsidian's ItemView.onClose cannot veto the close — the leaf is torn
+    // down regardless of what this promise resolves to. So the prompt only
+    // offers Save (write before the view goes away) or Discard; there is no
+    // honest "Cancel" that keeps the view open, so we don't pretend to offer one.
     return new Promise((resolve) => {
       const modal = new DirtyCloseModal(
         this.app,
@@ -383,8 +416,6 @@ export class CompareView extends ItemView {
           if (action === "save") {
             await this.save();
           }
-          // "discard" and "cancel" both just resolve (view closes either way
-          // since Obsidian does not have a cancellable onClose hook).
           resolve();
         },
       );
@@ -423,7 +454,7 @@ export class CompareView extends ItemView {
 class DirtyCloseModal extends Modal {
   constructor(
     app: App,
-    private onAction: (action: "save" | "discard" | "cancel") => Promise<void>,
+    private onAction: (action: "save" | "discard") => Promise<void>,
   ) {
     super(app);
   }
@@ -432,7 +463,7 @@ class DirtyCloseModal extends Modal {
     const { contentEl, titleEl } = this;
     titleEl.setText("Unsaved changes");
     contentEl.createEl("p", {
-      text: "You have unsaved changes in the compare view. What would you like to do?",
+      text: "This compare view has unsaved changes and is closing. Save them before it closes?",
     });
 
     const buttons = contentEl.createDiv({ cls: "gatekeeper-diff-buttons" });
@@ -446,16 +477,12 @@ class DirtyCloseModal extends Modal {
       await this.onAction("save");
     };
 
-    const discardBtn = buttons.createEl("button", { text: "Discard changes" });
+    const discardBtn = buttons.createEl("button", {
+      text: "Discard & close",
+    });
     discardBtn.onclick = async () => {
       this.close();
       await this.onAction("discard");
-    };
-
-    const cancelBtn = buttons.createEl("button", { text: "Cancel" });
-    cancelBtn.onclick = async () => {
-      this.close();
-      await this.onAction("cancel");
     };
   }
 

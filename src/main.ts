@@ -10,7 +10,6 @@ import { GraphDecorator } from "./graph-decorator";
 import { ReviewView } from "./review-view";
 import { CompareView } from "./compare-view";
 import { StatusStore } from "./status-store";
-import { DiffModal } from "./diff-view";
 import { GatekeeperSettingTab, isValidTargetFolder } from "./settings";
 import {
   DEFAULT_SETTINGS,

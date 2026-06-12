@@ -168,6 +168,45 @@ export function applyHunkToRight(targetLines: string[], hunk: Hunk): string[] {
 }
 
 /**
+ * Split text into the SAME line model the diff/hunk indices use.
+ *
+ * `computeDiffLines` strips a single trailing newline before splitting, so a
+ * buffer ending in "\n" yields N lines, not N+1 with a phantom empty line.
+ * Applying hunks with a naive `text.split("\n")` therefore misaligns indices
+ * around EOF and loses the file's final-newline state on `join`. These helpers
+ * split/join consistently and preserve whether the text ended with a newline.
+ */
+function splitLines(text: string): { lines: string[]; trailingNewline: boolean } {
+  const trailingNewline = /\n$/.test(text);
+  return { lines: text.replace(/\n$/, "").split("\n"), trailingNewline };
+}
+
+function joinLines(lines: string[], trailingNewline: boolean): string {
+  return lines.join("\n") + (trailingNewline ? "\n" : "");
+}
+
+/**
+ * Apply a hunk to the vault text in the direction vault ← target (revert),
+ * preserving the vault text's trailing-newline state. String-level wrapper
+ * around applyHunkToLeft that uses the diff's line model — callers should use
+ * this instead of hand-rolling split("\n")/join("\n").
+ */
+export function applyHunkToVaultText(vaultText: string, hunk: Hunk): string {
+  const { lines, trailingNewline } = splitLines(vaultText);
+  return joinLines(applyHunkToLeft(lines, hunk), trailingNewline);
+}
+
+/**
+ * Apply a hunk to the target text in the direction vault → target (accept),
+ * preserving the target text's trailing-newline state. String-level wrapper
+ * around applyHunkToRight.
+ */
+export function applyHunkToTargetText(targetText: string, hunk: Hunk): string {
+  const { lines, trailingNewline } = splitLines(targetText);
+  return joinLines(applyHunkToRight(lines, hunk), trailingNewline);
+}
+
+/**
  * Convenience: compute hunks directly from two text strings.
  * before = target content, after = vault content.
  */
