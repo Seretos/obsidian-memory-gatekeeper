@@ -177,21 +177,21 @@
   box-shadow: inset 4px 0 0 0 #d04545;
 }
 
-/* Changed/deleted words — near-solid fill so the actual edits pop on dark */
-.gatekeeper-compare-editor .cm-merge-a .cm-changedText {
-  background-color: rgba(46, 160, 67, 0.8) !important;
+/* Changed/deleted words — no extra fill on top of the line background; just a
+   non-color cue (underline = changed, line-through = deleted) to pinpoint the
+   exact words without a second, distracting background layer. */
+.gatekeeper-compare-editor .cm-merge-a .cm-changedText,
+.gatekeeper-compare-editor .cm-merge-b .cm-changedText {
+  background-color: transparent !important;
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 2px;
-  border-radius: 2px;
 }
-.gatekeeper-compare-editor .cm-merge-b .cm-changedText,
 .gatekeeper-compare-editor .cm-deletedChunk .cm-deletedText,
 .gatekeeper-compare-editor .cm-deletedText {
-  background-color: rgba(208, 69, 69, 0.8) !important;
+  background-color: transparent !important;
   text-decoration: line-through;
   text-decoration-thickness: 2px;
-  border-radius: 2px;
 }
 .gatekeeper-compare-editor .cm-changeGutter {
   width: 12px;
