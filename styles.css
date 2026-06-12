@@ -156,28 +156,42 @@
    Red-green-safe: changed lines carry a thick left bar (solid = added side,
    dashed = deleted side) and inline edits use underline / line-through so the
    change is legible without relying on hue. */
-.gatekeeper-compare-editor .cm-changedLine {
-  background-color: rgba(64, 191, 128, 0.32);
+/* @codemirror/merge ships a baseTheme whose selectors are highly specific
+   (`.cm-editor.cm-merge-a .cm-changedLine`, plus `&dark…` variants), so plain
+   overrides lose. We use !important to win reliably across light/dark and both
+   editors. a = left (vault / new) -> green; b = right (target / old) and all
+   deletions -> red. Solid vs dashed left bar + underline/line-through keep it
+   legible without relying on hue (red-green color weakness). */
+
+/* Changed lines — new (a) side green, old (b) side red */
+.gatekeeper-compare-editor .cm-merge-a .cm-changedLine,
+.gatekeeper-compare-editor .cm-insertedLine {
+  background-color: rgba(64, 191, 128, 0.32) !important;
   box-shadow: inset 4px 0 0 0 #2ea043;
 }
-.gatekeeper-compare-editor .cm-changedText {
-  /* The actually-changed words: near-solid fill + underline so they pop even
-     when the line background blends into a dark theme. */
-  background-color: rgba(46, 160, 67, 0.75);
+.gatekeeper-compare-editor .cm-merge-b .cm-changedLine,
+.gatekeeper-compare-editor .cm-inlineChangedLine,
+.gatekeeper-compare-editor .cm-deletedChunk,
+.gatekeeper-compare-editor .cm-deletedLine {
+  background-color: rgba(224, 80, 80, 0.3) !important;
+  box-shadow: inset 4px 0 0 0 #d04545;
+}
+
+/* Changed/deleted words — near-solid fill so the actual edits pop on dark */
+.gatekeeper-compare-editor .cm-merge-a .cm-changedText {
+  background-color: rgba(46, 160, 67, 0.8) !important;
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 2px;
   border-radius: 2px;
 }
-.gatekeeper-compare-editor .cm-deletedChunk {
-  background-color: rgba(224, 80, 80, 0.32);
-  box-shadow: inset 4px 0 0 0 #d04545;
-}
+.gatekeeper-compare-editor .cm-merge-b .cm-changedText,
 .gatekeeper-compare-editor .cm-deletedChunk .cm-deletedText,
 .gatekeeper-compare-editor .cm-deletedText {
-  background-color: rgba(208, 69, 69, 0.75);
+  background-color: rgba(208, 69, 69, 0.8) !important;
   text-decoration: line-through;
   text-decoration-thickness: 2px;
+  border-radius: 2px;
 }
 .gatekeeper-compare-editor .cm-changeGutter {
   width: 12px;
