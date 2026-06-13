@@ -390,6 +390,31 @@ describe("buildDiffSegments", () => {
     expect(change.added).toEqual(["NEW"]);
     expect(segs[1]).toEqual({ type: "context", lines: ["b"] });
   });
+
+  // Tombstone-shape edge cases: empty vault ("") vs non-empty target.
+  // These mirror what ComparisonEngine.acceptToTarget sees when a deletion
+  // tombstone (empty vault file) is diffed against an existing target.
+
+  it("tombstone shape — empty vault vs non-empty target: one change segment with all removed", () => {
+    // before = target (existing memory content), after = vault (empty tombstone)
+    const segs = buildDiffSegments("line1\nline2", "");
+    expect(segs).toHaveLength(1);
+    expect(segs[0].type).toBe("change");
+    const change = segs[0] as ChangeSegment;
+    // The target lines appear as "removed" (they will be deleted on accept).
+    expect(change.removed).toEqual(["line1", "line2"]);
+    expect(change.added).toEqual([]);
+  });
+
+  it("tombstone shape — non-empty vault vs empty target: one change segment with all added", () => {
+    // before = target (empty), after = vault (new content)
+    const segs = buildDiffSegments("", "line1\nline2");
+    expect(segs).toHaveLength(1);
+    expect(segs[0].type).toBe("change");
+    const change = segs[0] as ChangeSegment;
+    expect(change.removed).toEqual([]);
+    expect(change.added).toEqual(["line1", "line2"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

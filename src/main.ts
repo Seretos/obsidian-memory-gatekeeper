@@ -211,10 +211,15 @@ export default class MemoryGatekeeperPlugin
     const entry = this.store.get(relPath);
     if (!entry) return;
     // Discard the proposal: revert the gatekeeper file to the target's content.
+    // For a tombstone (empty vault file = deletion proposal), revertFromTarget
+    // writes the target content back into the vault file, cancelling the deletion.
     const reverted = await this.engine.revertFromTarget(relPath);
     if (reverted) {
       // revertFromTarget rescans -> refreshUI fires via onChange.
-      new Notice(`Discarded (reverted to memory): ${relPath}`);
+      const notice = entry.isTombstone
+        ? `Cancelled deletion: ${relPath}`
+        : `Discarded (reverted to memory): ${relPath}`;
+      new Notice(notice);
       return;
     }
     // New file with no target counterpart: never delete, so hide it (by content

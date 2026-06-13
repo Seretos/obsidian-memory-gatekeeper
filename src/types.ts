@@ -13,7 +13,16 @@ export interface StatusEntry {
 }
 
 /** Only "new" and "modified" entries are surfaced to the UI. */
-export type DivergentEntry = StatusEntry & { status: "new" | "modified" };
+export type DivergentEntry = StatusEntry & {
+  status: "new" | "modified";
+  /**
+   * True when the vault file is empty (a deletion tombstone written by the
+   * upstream hook to signal that the corresponding memory file should be
+   * removed). Accepting a tombstone deletes both the target and vault copy
+   * rather than copying empty content.
+   */
+  isTombstone?: boolean;
+};
 
 export interface DiffData {
   relPath: string;

@@ -35,6 +35,16 @@ Mental model — get this right or the directions invert:
     only remaining use of the dismissed map, and `scan()` only consults it for
     `status === "new"`. `StatusStore` takes the dismissed map by reference so
     mutating it persists via `saveSettings()`.
+  - **Exception — tombstone accept** (the one deliberate vault deletion): if the
+    vault file is empty (`vaultContent.trim() === ""`), it is treated as a
+    deletion tombstone written by the upstream memory hook to signal that the
+    corresponding real memory file should be removed. Accepting such an entry in
+    `ComparisonEngine.acceptToTarget` deletes both the target file (via
+    `fs.unlink`) and the vault file (via `vault.adapter.remove`). This is the
+    only code path that deletes a vault file, and it is strictly gated on the
+    empty-tombstone condition. Discarding a tombstone (`dismiss`) calls
+    `revertFromTarget` as normal, which restores the target's content into the
+    vault file, effectively cancelling the deletion proposal.
 
 - **The plugin is inert until a valid target folder is set.** This is deliberate
   so unrelated vaults aren't affected (plugin settings are per-vault in
@@ -79,7 +89,9 @@ Mental model — get this right or the directions invert:
 - Content comparison is **byte-exact** (no line-ending normalization). If real
   memories and gatekeeper copies ever differ only by EOL, revisit `scan()`.
 - Build: `npm run build` (typechecks then bundles to `main.js` via esbuild).
-  `npm run dev` watches. There is no test suite — verify in a real vault.
+  `npm run dev` watches. Unit tests: `npm run test` (vitest run, covers pure core
+  modules — compare, diff-lines, hunks, graph-labels, color-groups, memory-index).
+  Integration still requires a real vault.
 
 ## Manual test / install
 

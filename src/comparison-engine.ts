@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { StatusStore } from "./status-store";
 import { classify, hashContent } from "./core/compare";
+import { regenerateMemoryIndex } from "./core/memory-index";
 import type { DiffData, DivergentEntry, GatekeeperSettings } from "./types";
 
 /**
@@ -117,7 +118,8 @@ export class ComparisonEngine {
       const status = classify(vaultContent, targetContent);
       if (status === "identical") continue;
 
-      const entry: DivergentEntry = { relPath, status, vaultHash };
+      const isTombstone = vaultContent.trim() === "";
+      const entry: DivergentEntry = { relPath, status, vaultHash, isTombstone };
       // Hash-based hiding only applies to new files (no target to revert to).
       // Modified files are always shown until accepted or reverted.
       if (status === "new" && this.store.isDismissed(entry)) continue;
@@ -153,8 +155,40 @@ export class ComparisonEngine {
   async acceptToTarget(relPath: string): Promise<void> {
     const vault = await this.app.vault.adapter.read(normalizePath(relPath));
     const dest = this.targetPath(relPath);
-    await fsp.mkdir(path.dirname(dest), { recursive: true });
-    await fsp.writeFile(dest, vault, "utf8");
+
+    // Derive the project subfolder from the first path segment. Files at the
+    // vault root (no "/" in relPath) do not belong to any project subfolder, so
+    // we skip MEMORY.md regeneration for them — readdir-ing a file path would
+    // silently produce a nonsensical index.
+    const firstSegment = relPath.split("/")[0];
+    const hasProjectFolder = relPath.includes("/");
+    const projectFolder = hasProjectFolder
+      ? path.join(this.settings.targetFolder, firstSegment)
+      : null;
+
+    if (vault.trim() === "") {
+      // Tombstone: the upstream hook signalled a deletion. Remove both copies.
+      try {
+        await fsp.unlink(dest);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      }
+      // This is the one deliberate vault deletion, gated on the empty tombstone.
+      await this.app.vault.adapter.remove(normalizePath(relPath));
+    } else {
+      // Normal accept: copy vault → target.
+      await fsp.mkdir(path.dirname(dest), { recursive: true });
+      await fsp.writeFile(dest, vault, "utf8");
+    }
+
+    // Regenerate the project's MEMORY.md index from the current approved files.
+    // Skipped for top-level files (no project subfolder).
+    if (projectFolder) {
+      await regenerateMemoryIndex(projectFolder).catch((e: unknown) => {
+        console.warn("[memory-index] regeneration failed:", e);
+      });
+    }
+
     await this.scan();
   }
 

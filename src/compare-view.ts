@@ -39,6 +39,11 @@ export class CompareView extends ItemView {
   private mode: CompareMode = "edit";
   /** True once buffers have been loaded from disk at least once. */
   private initialized = false;
+
+  /** True when the vault (left) buffer is empty — signals a deletion tombstone. */
+  get isTombstone(): boolean {
+    return this.initialized && this.leftBuffer.trim() === "";
+  }
   /**
    * Whether the target (memory) file existed when loaded. Distinguishes "no
    * target file yet" (a new proposal) from "target file exists but is empty",
@@ -212,8 +217,19 @@ export class CompareView extends ItemView {
     if (filenameEl) filenameEl.setText(this.relPath || "");
 
     if (this.mode === "edit") {
+      // In edit mode the banner is rendered here, before the editor is built,
+      // because renderEditMode() appends directly into contentArea.
+      if (this.isTombstone) {
+        this.contentArea.createDiv({
+          cls: "gatekeeper-tombstone-banner",
+          text: "Deletion proposed — accepting will remove this memory file.",
+        });
+      }
       this.renderEditMode();
     } else {
+      // In compare mode the banner is rendered inside renderCompareMode() so
+      // that it survives hunk accept/revert re-renders (which call
+      // renderCompareMode() directly, bypassing renderCurrent()).
       void this.renderCompareMode();
     }
   }
@@ -267,6 +283,16 @@ export class CompareView extends ItemView {
     // Clear any previous render before building (prevents DOM accumulation when
     // called from hunk-apply onclick handlers).
     this.contentArea.empty();
+
+    // Tombstone banner: inserted after empty() so it survives every render path
+    // that reaches renderCompareMode(), including hunk accept/revert re-renders
+    // that bypass renderCurrent() and call this method directly.
+    if (this.isTombstone) {
+      this.contentArea.createDiv({
+        cls: "gatekeeper-tombstone-banner",
+        text: "Deletion proposed — accepting will remove this memory file.",
+      });
+    }
 
     // Fresh render scope: unload the previous one so its MarkdownRenderChild
     // instances are disposed instead of accumulating on the view across the
