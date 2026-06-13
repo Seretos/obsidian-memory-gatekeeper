@@ -7,6 +7,7 @@ import {
 import { ComparisonEngine } from "./comparison-engine";
 import { ExplorerDecorator } from "./explorer-decorator";
 import { GraphDecorator } from "./graph-decorator";
+import { GraphLabelDecorator } from "./graph-label-decorator";
 import { ReviewView } from "./review-view";
 import { CompareView } from "./compare-view";
 import { StatusStore } from "./status-store";
@@ -29,6 +30,7 @@ export default class MemoryGatekeeperPlugin
   private engine?: ComparisonEngine;
   private explorer?: ExplorerDecorator;
   private graph?: GraphDecorator;
+  private graphLabels?: GraphLabelDecorator;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -133,6 +135,7 @@ export default class MemoryGatekeeperPlugin
   private async activate(): Promise<void> {
     this.explorer = new ExplorerDecorator(this.app, this.store);
     this.graph = new GraphDecorator(this.app, this.store);
+    this.graphLabels = new GraphLabelDecorator(this.app);
     this.engine = new ComparisonEngine(this.app, this.settings, this.store);
     this.engine.onChange(() => this.refreshUI());
     await this.engine.start();
@@ -143,8 +146,10 @@ export default class MemoryGatekeeperPlugin
     this.engine = undefined;
     this.explorer?.clear();
     this.graph?.clear();
+    this.graphLabels?.clear();
     this.explorer = undefined;
     this.graph = undefined;
+    this.graphLabels = undefined;
     this.store.setAll([]);
     this.refreshViews();
   }
@@ -167,6 +172,7 @@ export default class MemoryGatekeeperPlugin
   private refreshDecorations(): void {
     this.explorer?.refresh();
     this.graph?.refresh();
+    this.graphLabels?.refresh();
   }
 
   private refreshViews(): void {

@@ -53,6 +53,22 @@ Mental model — get this right or the directions invert:
   `GraphDecorator` reserves two groups by color (green=new, orange=modified),
   preserves user groups, and skips re-applying when unchanged (re-render reflows
   for ~1–2s). All engine access is wrapped in try/catch and may break on updates.
+- **Graph project labels** (`GraphLabelDecorator`) relabel each project's
+  central `MEMORY.md` node with the project name (they'd otherwise all read
+  "MEMORY"). There is no label API, so this mutates renderer internals:
+  `leaf.view.renderer.nodes[i].text` is a **PIXI.Text** whose `.text` and
+  `.style` (fontSize/fontWeight) we overwrite for the dominant first line, and a
+  second smaller **child PIXI.Text** is attached for the `(MEMORY)` line (a
+  single PIXI.Text has only one style; the child inherits the node's
+  transform, so it tracks pan/zoom). Labels are created lazily and recreated as
+  nodes enter/leave the viewport, so we **re-assert on an interval** that is
+  *gated on a graph leaf being open* (no polling otherwise) rather than wrapping
+  the renderer's per-frame callback. Project name comes from the node file's
+  `project` frontmatter (written upstream by the memory hook — see
+  `agent-claude-memory-gatekeeper#6`); it falls back to the encoded top folder
+  segment, which is **not reliably decodable** into a pretty name. The pure
+  decision logic lives in `core/graph-labels.ts` (unit-tested); all engine
+  access is try/catch-wrapped and may break on Obsidian updates.
 - **Explorer markers** toggle CSS classes on `.nav-file-title[data-path]`. Also
   unofficial; we re-apply on `layout-change` because Obsidian rebuilds that DOM.
 
