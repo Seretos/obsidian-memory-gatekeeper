@@ -171,4 +171,18 @@ export class ComparisonEngine {
     await this.scan();
     return true;
   }
+
+  /** Write arbitrary content back to the vault (gatekeeper) file. */
+  async writeVault(relPath: string, content: string): Promise<void> {
+    await this.app.vault.adapter.write(normalizePath(relPath), content);
+    await this.scan();
+  }
+
+  /** Write arbitrary content to the target (real memory) file, creating dirs as needed. */
+  async writeTarget(relPath: string, content: string): Promise<void> {
+    const dest = this.targetPath(relPath);
+    await fsp.mkdir(path.dirname(dest), { recursive: true });
+    await fsp.writeFile(dest, content, "utf8");
+    await this.scan();
+  }
 }

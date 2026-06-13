@@ -1,6 +1,5 @@
 import { App, ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type { StatusStore } from "./status-store";
-import { DiffModal } from "./diff-view";
 import { REVIEW_VIEW_TYPE, type GatekeeperActions } from "./types";
 
 /**
@@ -85,8 +84,7 @@ export class ReviewView extends ItemView {
     const btns = row.createDiv({ cls: "gatekeeper-row-buttons" });
 
     const diffBtn = btns.createEl("button", { text: "Diff" });
-    diffBtn.onclick = () =>
-      new DiffModal(this.app, relPath, this.actions).open();
+    diffBtn.onclick = () => void this.actions.openCompare(relPath);
 
     const acceptBtn = btns.createEl("button", { cls: "mod-cta", text: "Accept" });
     acceptBtn.onclick = async () => {
