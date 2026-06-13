@@ -1,6 +1,6 @@
 import { App, ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type { StatusStore } from "./status-store";
-import { REVIEW_VIEW_TYPE, type GatekeeperActions } from "./types";
+import { REVIEW_VIEW_TYPE, type DivergentEntry, type GatekeeperActions } from "./types";
 
 /**
  * Sidebar panel listing all divergent (new/modified) files grouped by status,
@@ -67,37 +67,50 @@ export class ReviewView extends ItemView {
         text: `${label} (${items.length})`,
       });
       for (const entry of items) {
-        this.renderRow(root, entry.relPath, status);
+        this.renderRow(root, entry);
       }
     }
   }
 
-  private renderRow(
-    parent: HTMLElement,
-    relPath: string,
-    status: "new" | "modified",
-  ): void {
+  private renderRow(parent: HTMLElement, entry: DivergentEntry): void {
+    const { relPath, status, isTombstone } = entry;
     const row = parent.createDiv({ cls: `gatekeeper-row gatekeeper-${status}` });
-    const name = row.createDiv({ cls: "gatekeeper-row-name", text: relPath });
-    name.onclick = () => void this.actions.openFile(relPath);
+
+    const nameEl = row.createDiv({ cls: "gatekeeper-row-name" });
+    nameEl.createSpan({ text: relPath });
+    if (isTombstone) {
+      nameEl.createSpan({
+        cls: "gatekeeper-tombstone-label",
+        text: " (deletion proposed)",
+      });
+    }
+    nameEl.onclick = () => void this.actions.openFile(relPath);
 
     const btns = row.createDiv({ cls: "gatekeeper-row-buttons" });
 
     const diffBtn = btns.createEl("button", { text: "Diff" });
     diffBtn.onclick = () => void this.actions.openCompare(relPath);
 
-    const acceptBtn = btns.createEl("button", { cls: "mod-cta", text: "Accept" });
+    const acceptLabel = isTombstone ? "Delete" : "Accept";
+    const acceptBtn = btns.createEl("button", { cls: "mod-cta", text: acceptLabel });
     acceptBtn.onclick = async () => {
       try {
         await this.actions.accept(relPath);
-        new Notice(`Accepted: ${relPath}`);
+        new Notice(
+          isTombstone ? `Deleted: ${relPath}` : `Accepted: ${relPath}`,
+        );
       } catch (e) {
         new Notice(`Accept failed: ${(e as Error).message}`);
       }
     };
 
     const dismissBtn = btns.createEl("button", { text: "Discard" });
-    dismissBtn.setAttr("aria-label", "Revert vault file to the memory version");
+    dismissBtn.setAttr(
+      "aria-label",
+      isTombstone
+        ? "Cancel deletion — keep the memory file"
+        : "Revert vault file to the memory version",
+    );
     dismissBtn.onclick = () => void this.actions.dismiss(relPath);
   }
 }
