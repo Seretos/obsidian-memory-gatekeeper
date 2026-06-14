@@ -94,8 +94,8 @@ export class GatekeeperSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Repair MEMORY.md indexes")
       .setDesc(
-        "Scans all project subfolders in the gatekeeper vault and the target memory folder. " +
-          "For any folder that has .md files but no MEMORY.md, generates the missing index.",
+        "Regenerates MEMORY.md in every project memory folder in the target, " +
+          "then mirrors each index into the vault so it does not show up as a diff.",
       )
       .addButton((btn) =>
         btn.setButtonText("Repair").onClick(async () => {
@@ -103,15 +103,13 @@ export class GatekeeperSettingTab extends PluginSettingTab {
             new Notice("No valid target folder configured.");
             return;
           }
-          const targetRepaired = await repairMissingIndexes(
-            this.plugin.settings.targetFolder,
-          ).catch(() => 0);
           const vaultBase = (this.plugin.app.vault.adapter as any)
             .basePath as string | undefined;
-          const vaultRepaired = vaultBase
-            ? await repairMissingIndexes(vaultBase).catch(() => 0)
-            : 0;
-          new Notice(`Repaired ${targetRepaired + vaultRepaired} folder(s).`);
+          const count = await repairMissingIndexes(
+            this.plugin.settings.targetFolder,
+            vaultBase ?? null,
+          ).catch(() => 0);
+          new Notice(`Repaired ${count} folder(s).`);
         }),
       );
   }

@@ -156,23 +156,21 @@ export class ComparisonEngine {
     const vault = await this.app.vault.adapter.read(normalizePath(relPath));
     const dest = this.targetPath(relPath);
 
-    // Derive the project subfolder from the first path segment. Files at the
-    // vault root (no "/" in relPath) do not belong to any project subfolder, so
-    // we skip MEMORY.md regeneration for them — readdir-ing a file path would
-    // silently produce a nonsensical index.
-    const firstSegment = relPath.split("/")[0];
-    const hasProjectFolder = relPath.includes("/");
-    const projectFolder = hasProjectFolder
-      ? path.join(this.settings.targetFolder, firstSegment)
-      : null;
+    // The memory folder is the directory that directly contains the file.
+    // Files at the vault root (no "/" in relPath) do not belong to any memory
+    // folder, so we skip MEMORY.md regeneration for them.
+    const hasParentFolder = relPath.includes("/");
 
-    // Vault-side project folder (parallel to the target-side project folder).
-    let vaultProjectFolder: string | null = null;
-    if (hasProjectFolder) {
+    // Target-side memory folder: the directory containing the target file.
+    const targetMemoryFolder = hasParentFolder ? path.dirname(dest) : null;
+
+    // Vault-side memory folder: the directory containing the vault file.
+    let vaultMemoryFolder: string | null = null;
+    if (hasParentFolder) {
       try {
         const vaultBase = (this.app.vault.adapter as any).basePath as string;
         if (vaultBase) {
-          vaultProjectFolder = path.join(vaultBase, firstSegment);
+          vaultMemoryFolder = path.dirname(path.join(vaultBase, relPath));
         }
       } catch {
         // Non-fatal: vault base path unavailable.
@@ -194,15 +192,15 @@ export class ComparisonEngine {
       await fsp.writeFile(dest, vault, "utf8");
     }
 
-    // Regenerate the project's MEMORY.md index from the current approved files.
-    // Skipped for top-level files (no project subfolder).
-    if (projectFolder) {
-      await regenerateMemoryIndex(projectFolder).catch((e: unknown) => {
+    // Regenerate MEMORY.md in the folder that contains the file on each side.
+    // Skipped for top-level files (no parent folder).
+    if (targetMemoryFolder) {
+      await regenerateMemoryIndex(targetMemoryFolder).catch((e: unknown) => {
         console.warn("[memory-index] target-side regeneration failed:", e);
       });
     }
-    if (vaultProjectFolder) {
-      await regenerateMemoryIndex(vaultProjectFolder).catch((e: unknown) => {
+    if (vaultMemoryFolder) {
+      await regenerateMemoryIndex(vaultMemoryFolder).catch((e: unknown) => {
         console.warn("[memory-index] vault-side regeneration failed:", e);
       });
     }
@@ -221,24 +219,22 @@ export class ComparisonEngine {
     if (target === null) return false;
     await this.app.vault.adapter.write(normalizePath(relPath), target);
 
-    // Regenerate MEMORY.md on both sides after discarding a change.
-    const firstSegment = relPath.split("/")[0];
-    const hasProjectFolder = relPath.includes("/");
+    // Regenerate MEMORY.md in the folder that contains the file on both sides.
+    // Skipped for top-level files (no parent folder).
+    const hasParentFolder = relPath.includes("/");
 
-    if (hasProjectFolder) {
-      const targetProjectFolder = path.join(
-        this.settings.targetFolder,
-        firstSegment,
-      );
-      await regenerateMemoryIndex(targetProjectFolder).catch((e: unknown) => {
+    if (hasParentFolder) {
+      const dest = this.targetPath(relPath);
+      const targetMemoryFolder = path.dirname(dest);
+      await regenerateMemoryIndex(targetMemoryFolder).catch((e: unknown) => {
         console.warn("[memory-index] target-side regeneration failed:", e);
       });
 
       try {
         const vaultBase = (this.app.vault.adapter as any).basePath as string;
         if (vaultBase) {
-          const vaultProjectFolder = path.join(vaultBase, firstSegment);
-          await regenerateMemoryIndex(vaultProjectFolder).catch(
+          const vaultMemoryFolder = path.dirname(path.join(vaultBase, relPath));
+          await regenerateMemoryIndex(vaultMemoryFolder).catch(
             (e: unknown) => {
               console.warn("[memory-index] vault-side regeneration failed:", e);
             },

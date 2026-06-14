@@ -4,6 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import {
   parseNameDescription,
+  parseProject,
   regenerateMemoryIndex,
   repairMissingIndexes,
 } from "../src/core/memory-index";
@@ -91,6 +92,48 @@ describe("parseNameDescription", () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseProject
+// ---------------------------------------------------------------------------
+
+describe("parseProject", () => {
+  it("returns the project value when present in frontmatter", () => {
+    const content = "---\nproject: my-project\nname: X\ndescription: Y\n---\n";
+    expect(parseProject(content)).toBe("my-project");
+  });
+
+  it("returns null when frontmatter has no project field", () => {
+    const content = "---\nname: X\ndescription: Y\n---\n";
+    expect(parseProject(content)).toBeNull();
+  });
+
+  it("returns null when project: value is empty", () => {
+    const content = "---\nproject:\nname: X\ndescription: Y\n---\n";
+    expect(parseProject(content)).toBeNull();
+  });
+
+  it("returns null when there is no frontmatter block at all", () => {
+    expect(parseProject("Just plain text with no frontmatter.")).toBeNull();
+  });
+
+  it("is independent of name/description — returns project even when name and description are absent", () => {
+    // parseNameDescription would return null for this content, but parseProject
+    // must still return the project value.
+    const content = "---\nproject: standalone-project\n---\n";
+    expect(parseProject(content)).toBe("standalone-project");
+  });
+
+  it("returns null when the opening --- is not on the first line", () => {
+    const content = "\n---\nproject: x\n---\n";
+    expect(parseProject(content)).toBeNull();
+  });
+
+  it("returns null when there is no closing ---", () => {
+    const content = "---\nproject: x\n";
+    expect(parseProject(content)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // regenerateMemoryIndex  (regression + edge cases)
 // ---------------------------------------------------------------------------
 
@@ -141,6 +184,9 @@ describe("regenerateMemoryIndex", () => {
     // Stale content is gone.
     expect(index).not.toContain("old");
     expect(index).not.toContain("stale");
+    // Fixtures carry no `project:` field — output must NOT start with frontmatter.
+    expect(index.startsWith("# Memory Index")).toBe(true);
+    expect(index).not.toContain("---");
   });
 
   // --- Edge cases --------------------------------------------------------
@@ -269,6 +315,30 @@ describe("regenerateMemoryIndex", () => {
     expect(second).not.toContain("My Entry");
     expect(second.startsWith("# Memory Index")).toBe(true);
   });
+
+  it("prepends project: frontmatter block when memory files carry a project field", async () => {
+    await writeFile(
+      "alpha.md",
+      "---\nproject: lib-python-vdesktop\nname: Alpha\ndescription: First entry\n---\n",
+    );
+    await writeFile(
+      "beta.md",
+      "---\nproject: lib-python-vdesktop\nname: Beta\ndescription: Second entry\n---\n",
+    );
+
+    await regenerateMemoryIndex(tmpDir);
+
+    const index = await readIndex();
+    // Must start with a YAML frontmatter block containing the project name.
+    expect(index.startsWith("---\nproject: lib-python-vdesktop\n---\n")).toBe(true);
+    // Must still contain the header and bullets after the frontmatter.
+    expect(index).toContain("# Memory Index");
+    expect(index).toContain("- [Alpha](alpha.md) — First entry");
+    expect(index).toContain("- [Beta](beta.md) — Second entry");
+    // The frontmatter block must appear before the header.
+    const fmEnd = index.indexOf("---\n\n#");
+    expect(fmEnd).toBeGreaterThan(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -276,129 +346,241 @@ describe("regenerateMemoryIndex", () => {
 // ---------------------------------------------------------------------------
 
 describe("repairMissingIndexes", () => {
-  let tmpDir: string;
+  let targetRoot: string;
+  let vaultRoot: string;
 
   beforeEach(async () => {
-    tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "gk-repair-"));
+    targetRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "gk-target-"));
+    vaultRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "gk-vault-"));
   });
 
   afterEach(async () => {
-    await fsp.rm(tmpDir, { recursive: true, force: true });
+    await fsp.rm(targetRoot, { recursive: true, force: true });
+    await fsp.rm(vaultRoot, { recursive: true, force: true });
   });
 
-  /** Write a file relative to tmpDir, creating parent dirs. */
-  async function writeFile(relPath: string, content: string): Promise<void> {
-    const full = path.join(tmpDir, relPath);
+  /** Write a file relative to a root dir, creating parent dirs. */
+  async function writeUnder(
+    root: string,
+    relPath: string,
+    content: string,
+  ): Promise<void> {
+    const full = path.join(root, relPath);
     await fsp.mkdir(path.dirname(full), { recursive: true });
     await fsp.writeFile(full, content, "utf8");
   }
 
-  it("regression: subfolder missing MEMORY.md with two valid .md files gets index written", async () => {
-    await writeFile(
-      path.join("project-a", "alpha.md"),
-      "---\nname: Alpha\ndescription: First entry\n---\n",
+  // Realistic memory-file frontmatter fixture.
+  const MEMORY_FILE = (name: string, desc: string, project = "my-project") =>
+    `---\nproject: ${project}\nname: ${name}\ndescription: ${desc}\n---\n`;
+
+  // ---------------------------------------------------------------------------
+
+  it(
+    "regression: index is written at <project>/memory/MEMORY.md (not <project>/MEMORY.md)",
+    async () => {
+      await writeUnder(
+        targetRoot,
+        path.join("proj-a", "memory", "file.md"),
+        MEMORY_FILE("File", "A file"),
+      );
+
+      const count = await repairMissingIndexes(targetRoot, null);
+
+      expect(count).toBe(1);
+      // Must exist at the memory subfolder, not the project root.
+      const indexPath = path.join(targetRoot, "proj-a", "memory", "MEMORY.md");
+      const content = await fsp.readFile(indexPath, "utf8");
+      expect(content).toContain("# Memory Index");
+      expect(content).toContain("- [File](file.md) — A file");
+
+      // Must NOT exist at the project root.
+      await expect(
+        fsp.access(path.join(targetRoot, "proj-a", "MEMORY.md")),
+      ).rejects.toThrow();
+    },
+  );
+
+  it("existing MEMORY.md in target is overwritten (count includes it)", async () => {
+    const stale = "# Stale\n\n- [old](old.md) — stale\n";
+    await writeUnder(
+      targetRoot,
+      path.join("proj-b", "memory", "MEMORY.md"),
+      stale,
     );
-    await writeFile(
-      path.join("project-a", "beta.md"),
-      "---\nname: Beta\ndescription: Second entry\n---\n",
+    await writeUnder(
+      targetRoot,
+      path.join("proj-b", "memory", "entry.md"),
+      MEMORY_FILE("Entry", "Fresh entry"),
     );
 
-    const count = await repairMissingIndexes(tmpDir);
+    const count = await repairMissingIndexes(targetRoot, null);
 
     expect(count).toBe(1);
-    const indexContent = await fsp.readFile(
-      path.join(tmpDir, "project-a", "MEMORY.md"),
+    const content = await fsp.readFile(
+      path.join(targetRoot, "proj-b", "memory", "MEMORY.md"),
       "utf8",
     );
-    expect(indexContent).toContain("# Memory Index");
-    expect(indexContent).toContain("- [Alpha](alpha.md) — First entry");
-    expect(indexContent).toContain("- [Beta](beta.md) — Second entry");
+    expect(content).toContain("- [Entry](entry.md) — Fresh entry");
+    expect(content).not.toContain("stale");
   });
 
-  it("subfolder that already has MEMORY.md is not touched; count stays 0", async () => {
-    const existingIndex = "# Memory Index\n\n- [Existing](existing.md) — Already here\n";
-    await writeFile(path.join("project-b", "MEMORY.md"), existingIndex);
-    await writeFile(
-      path.join("project-b", "existing.md"),
-      "---\nname: Existing\ndescription: Already here\n---\n",
+  it(
+    "index is mirrored to <vaultRoot>/<project>/memory/MEMORY.md when vault folder exists",
+    async () => {
+      await writeUnder(
+        targetRoot,
+        path.join("proj-c", "memory", "file.md"),
+        MEMORY_FILE("File C", "Desc C"),
+      );
+      // Pre-create the vault memory folder so the mirror is allowed.
+      await fsp.mkdir(path.join(vaultRoot, "proj-c", "memory"), {
+        recursive: true,
+      });
+
+      await repairMissingIndexes(targetRoot, vaultRoot);
+
+      const targetIndex = path.join(
+        targetRoot,
+        "proj-c",
+        "memory",
+        "MEMORY.md",
+      );
+      const vaultIndex = path.join(vaultRoot, "proj-c", "memory", "MEMORY.md");
+      const targetContent = await fsp.readFile(targetIndex, "utf8");
+      const vaultContent = await fsp.readFile(vaultIndex, "utf8");
+      // Content must be identical — mirror is a byte-exact copy.
+      expect(vaultContent).toBe(targetContent);
+    },
+  );
+
+  it(
+    "mirror copy is skipped when the vault folder does not exist (no new vault dirs created)",
+    async () => {
+      await writeUnder(
+        targetRoot,
+        path.join("proj-d", "memory", "file.md"),
+        MEMORY_FILE("File D", "Desc D"),
+      );
+      // Vault folder for proj-d does NOT exist.
+
+      const count = await repairMissingIndexes(targetRoot, vaultRoot);
+
+      expect(count).toBe(1);
+      // Target MEMORY.md written.
+      await expect(
+        fsp.access(path.join(targetRoot, "proj-d", "memory", "MEMORY.md")),
+      ).resolves.toBeUndefined();
+      // Vault folder must not have been created.
+      await expect(
+        fsp.access(path.join(vaultRoot, "proj-d")),
+      ).rejects.toThrow();
+    },
+  );
+
+  it("vaultRoot=null skips mirror step entirely", async () => {
+    await writeUnder(
+      targetRoot,
+      path.join("proj-e", "memory", "file.md"),
+      MEMORY_FILE("File E", "Desc E"),
     );
 
-    const count = await repairMissingIndexes(tmpDir);
+    const count = await repairMissingIndexes(targetRoot, null);
 
-    expect(count).toBe(0);
-    // Content must be unchanged.
-    const indexContent = await fsp.readFile(
-      path.join(tmpDir, "project-b", "MEMORY.md"),
-      "utf8",
-    );
-    expect(indexContent).toBe(existingIndex);
-  });
-
-  it("subfolder with no .md files at all is skipped; count stays 0", async () => {
-    // Create a subfolder that only contains a non-.md file.
-    await writeFile(path.join("project-empty", "notes.txt"), "plain text");
-
-    const count = await repairMissingIndexes(tmpDir);
-
-    expect(count).toBe(0);
-    // No MEMORY.md should have been created.
+    expect(count).toBe(1);
+    // Target written.
     await expect(
-      fsp.access(path.join(tmpDir, "project-empty", "MEMORY.md")),
-    ).rejects.toThrow();
+      fsp.access(path.join(targetRoot, "proj-e", "memory", "MEMORY.md")),
+    ).resolves.toBeUndefined();
   });
 
-  it("multiple subfolders — only those missing MEMORY.md are repaired; count matches", async () => {
-    // project-has-index: already has MEMORY.md → skip.
-    await writeFile(
-      path.join("project-has-index", "MEMORY.md"),
-      "# Memory Index\n\n",
-    );
-    await writeFile(
-      path.join("project-has-index", "file.md"),
-      "---\nname: File\ndescription: In indexed project\n---\n",
-    );
-
-    // project-needs-index: missing MEMORY.md, has .md files → repair.
-    await writeFile(
-      path.join("project-needs-index", "entry.md"),
-      "---\nname: Entry\ndescription: Needs index\n---\n",
-    );
-
-    // project-empty-no-index: no .md files → skip even though MEMORY.md absent.
-    await writeFile(
-      path.join("project-empty-no-index", "data.json"),
+  it("folder with no .md files (only .json/.txt) is skipped; count stays 0", async () => {
+    await writeUnder(
+      targetRoot,
+      path.join("proj-nomd", "memory", "data.jsonl"),
       "{}",
     );
-
-    const count = await repairMissingIndexes(tmpDir);
-
-    expect(count).toBe(1);
-    const repairedIndex = await fsp.readFile(
-      path.join(tmpDir, "project-needs-index", "MEMORY.md"),
-      "utf8",
-    );
-    expect(repairedIndex).toContain("- [Entry](entry.md) — Needs index");
-  });
-
-  it("top-level .md files (not in any subfolder) are ignored", async () => {
-    // A .md file directly under tmpDir (the root) — no subfolder.
-    await writeFile(
-      "top-level.md",
-      "---\nname: Top\ndescription: At root\n---\n",
+    await writeUnder(
+      targetRoot,
+      path.join("proj-nomd", "memory", "notes.txt"),
+      "plain text",
     );
 
-    const count = await repairMissingIndexes(tmpDir);
+    const count = await repairMissingIndexes(targetRoot, null);
 
     expect(count).toBe(0);
-    // No MEMORY.md should have been written at the root.
     await expect(
-      fsp.access(path.join(tmpDir, "MEMORY.md")),
+      fsp.access(path.join(targetRoot, "proj-nomd", "memory", "MEMORY.md")),
     ).rejects.toThrow();
   });
 
-  it("non-existent rootDir returns 0 without throwing", async () => {
-    const nonExistent = path.join(tmpDir, "does-not-exist");
-    const count = await repairMissingIndexes(nonExistent);
+  it("top-level .md files directly under targetRoot are ignored (root is not a memory folder)", async () => {
+    await writeUnder(
+      targetRoot,
+      "top-level.md",
+      MEMORY_FILE("Top", "At root"),
+    );
+
+    const count = await repairMissingIndexes(targetRoot, null);
+
     expect(count).toBe(0);
+    // No MEMORY.md should be written at the root.
+    await expect(
+      fsp.access(path.join(targetRoot, "MEMORY.md")),
+    ).rejects.toThrow();
+  });
+
+  it("multiple memory folders — all are regenerated; count is total", async () => {
+    // Two projects, each with a memory subfolder.
+    await writeUnder(
+      targetRoot,
+      path.join("proj-1", "memory", "a.md"),
+      MEMORY_FILE("A", "First"),
+    );
+    await writeUnder(
+      targetRoot,
+      path.join("proj-2", "memory", "b.md"),
+      MEMORY_FILE("B", "Second"),
+    );
+
+    const count = await repairMissingIndexes(targetRoot, null);
+
+    expect(count).toBe(2);
+    const idx1 = await fsp.readFile(
+      path.join(targetRoot, "proj-1", "memory", "MEMORY.md"),
+      "utf8",
+    );
+    const idx2 = await fsp.readFile(
+      path.join(targetRoot, "proj-2", "memory", "MEMORY.md"),
+      "utf8",
+    );
+    expect(idx1).toContain("- [A](a.md) — First");
+    expect(idx2).toContain("- [B](b.md) — Second");
+  });
+
+  it("non-existent targetRoot returns 0 without throwing", async () => {
+    const nonExistent = path.join(targetRoot, "does-not-exist");
+    const count = await repairMissingIndexes(nonExistent, null);
+    expect(count).toBe(0);
+  });
+
+  it("generated index carries project: frontmatter when memory files have it", async () => {
+    await writeUnder(
+      targetRoot,
+      path.join("proj-fm", "memory", "file.md"),
+      MEMORY_FILE("File FM", "Has project frontmatter", "lib-python-vdesktop"),
+    );
+
+    await repairMissingIndexes(targetRoot, null);
+
+    const content = await fsp.readFile(
+      path.join(targetRoot, "proj-fm", "memory", "MEMORY.md"),
+      "utf8",
+    );
+    expect(content.startsWith("---\nproject: lib-python-vdesktop\n---\n")).toBe(
+      true,
+    );
+    expect(content).toContain("# Memory Index");
+    expect(content).toContain("- [File FM](file.md) — Has project frontmatter");
   });
 });

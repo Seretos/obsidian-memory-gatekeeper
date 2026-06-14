@@ -44,6 +44,38 @@ export function parseNameDescription(
 }
 
 /**
+ * Parse the `project:` field from YAML frontmatter. Returns the trimmed value
+ * when found and non-empty, null otherwise. Independent of parseNameDescription's
+ * null rule — a file can lack name/description but still carry a project field.
+ *
+ * Pure — no Obsidian imports, no DOM access.
+ */
+export function parseProject(content: string): string | null {
+  const lines = content.split("\n");
+  if (lines[0].trim() !== "---") return null;
+
+  let closingIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") {
+      closingIdx = i;
+      break;
+    }
+  }
+  if (closingIdx === -1) return null;
+
+  const block = lines.slice(1, closingIdx);
+  for (const line of block) {
+    const m = line.match(/^(\w+):\s*(.*)/);
+    if (!m) continue;
+    if (m[1] === "project") {
+      const value = m[2].trim();
+      return value || null;
+    }
+  }
+  return null;
+}
+
+/**
  * Enumerate all `.md` files under `projectFolder` (recursively), except
  * `MEMORY.md`, read their YAML frontmatter, and write a fresh `MEMORY.md`
  * index into that folder. Files whose frontmatter is absent or incomplete are
@@ -51,7 +83,18 @@ export function parseNameDescription(
  *
  * Sort order: alphabetical by path relative to `projectFolder`.
  *
- * Output format:
+ * Output format (when a `project:` field is found in any sibling .md file):
+ * ```
+ * ---
+ * project: <value>
+ * ---
+ *
+ * # Memory Index
+ *
+ * - [<name>](<relPath>) — <description>
+ * ```
+ *
+ * Output format (when no `project:` field is found — keeps existing tests green):
  * ```
  * # Memory Index
  *
@@ -68,7 +111,25 @@ export async function regenerateMemoryIndex(
   // Sort deterministically by relative path.
   entries.sort((a, b) => a.relPath.localeCompare(b.relPath));
 
-  const lines: string[] = ["# Memory Index", ""];
+  // Determine the project name from the first non-empty `project:` value found
+  // across all sibling .md files (independent of name/description validity).
+  let projectName: string | null = null;
+  for (const { content } of entries) {
+    const p = parseProject(content);
+    if (p) {
+      projectName = p;
+      break;
+    }
+  }
+
+  const lines: string[] = [];
+
+  // Prepend YAML frontmatter block when a project name is known.
+  if (projectName) {
+    lines.push("---", `project: ${projectName}`, "---", "");
+  }
+
+  lines.push("# Memory Index", "");
   for (const { relPath, content } of entries) {
     const parsed = parseNameDescription(content);
     if (!parsed) {
@@ -88,49 +149,130 @@ export async function regenerateMemoryIndex(
 }
 
 /**
- * Scan immediate subdirectories of `rootDir` and, for each that:
- *   (a) has no MEMORY.md at its root, AND
- *   (b) contains at least one .md file (other than MEMORY.md) anywhere inside it,
- * generate a fresh MEMORY.md via `regenerateMemoryIndex`.
+ * Recursively walk `targetRoot` to find every directory (excluding targetRoot
+ * itself) that directly contains at least one `.md` file other than `MEMORY.md`.
+ * These are the "memory folders" (e.g. `<project>/memory/`).
  *
- * Returns the number of folders repaired. Subfolders that already have a
- * MEMORY.md are left untouched. Top-level files (not in any subfolder) are
- * ignored. A non-existent `rootDir` returns 0 without throwing.
+ * For each such folder:
+ *   1. Call `regenerateMemoryIndex(folder)` to write / overwrite
+ *      `<folder>/MEMORY.md` in the TARGET (always regenerated, even if one
+ *      already exists).
+ *   2. If `vaultRoot` is non-null, compute the mirrored vault path
+ *      (`path.join(vaultRoot, path.relative(targetRoot, folder))`). If that
+ *      vault folder already exists, copy the freshly generated `MEMORY.md`
+ *      there (overwrite). New vault folders are never created — mirror only.
  *
+ * Returns the count of target memory folders regenerated.
+ * A non-existent `targetRoot` returns 0 without throwing.
+ * `vaultRoot === null` means skip the mirror step.
+ *
+ * All copy I/O is non-fatal (try/catch + console.warn).
  * Node-`fs`-only; no Obsidian imports.
  */
-export async function repairMissingIndexes(rootDir: string): Promise<number> {
+export async function repairMissingIndexes(
+  targetRoot: string,
+  vaultRoot: string | null,
+): Promise<number> {
+  let repaired = 0;
+
+  // Collect every directory (excluding targetRoot) that directly holds ≥1 .md
+  // file (excluding MEMORY.md). Walk recursively.
+  const memoryFolders = await findMemoryFolders(targetRoot);
+
+  for (const folder of memoryFolders) {
+    // Regenerate in the target (always overwrite). Track whether it succeeded
+    // so the count only reflects actual successful regenerations.
+    let regenerated = false;
+    try {
+      await regenerateMemoryIndex(folder);
+      regenerated = true;
+    } catch (e: unknown) {
+      console.warn("[memory-index] repair: regeneration failed for", folder, e);
+    }
+    if (regenerated) repaired += 1;
+
+    // Mirror into the vault if vaultRoot is provided and the vault folder exists.
+    if (vaultRoot !== null) {
+      const rel = path.relative(targetRoot, folder);
+      const vaultFolder = path.join(vaultRoot, rel);
+      try {
+        // Only mirror if the vault folder actually exists — stat throws otherwise.
+        const stat = await fsp.stat(vaultFolder);
+        if (stat.isDirectory()) {
+          const src = path.join(folder, "MEMORY.md");
+          const dst = path.join(vaultFolder, "MEMORY.md");
+          await fsp.copyFile(src, dst);
+        }
+      } catch (e: unknown) {
+        // Vault folder absent or copy failed — non-fatal.
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          console.warn("[memory-index] repair: vault mirror failed for", vaultFolder, e);
+        }
+      }
+    }
+  }
+
+  return repaired;
+}
+
+/**
+ * Recursively find all directories UNDER `rootDir` (rootDir itself is never
+ * included) that directly contain at least one `.md` file other than `MEMORY.md`.
+ * A non-existent `rootDir` returns an empty array without throwing.
+ */
+async function findMemoryFolders(rootDir: string): Promise<string[]> {
   let dirents;
   try {
     dirents = await fsp.readdir(rootDir, { withFileTypes: true });
   } catch {
-    return 0;
+    return [];
   }
 
-  let repaired = 0;
+  const results: string[] = [];
   for (const dirent of dirents) {
     if (!dirent.isDirectory()) continue;
     const subdir = path.join(rootDir, dirent.name);
-    const indexPath = path.join(subdir, "MEMORY.md");
+    // Check and recurse into this subdirectory.
+    const subResults = await findMemoryFoldersRecurse(subdir);
+    results.push(...subResults);
+  }
+  return results;
+}
 
-    // Skip if MEMORY.md already exists.
-    try {
-      await fsp.access(indexPath);
-      continue; // already has MEMORY.md
-    } catch {
-      // MEMORY.md absent — proceed
-    }
-
-    // Only repair if there is at least one .md file (other than MEMORY.md)
-    // anywhere inside this subfolder.
-    const mdFiles = await collectMdFiles(subdir, subdir);
-    if (mdFiles.length === 0) continue;
-
-    await regenerateMemoryIndex(subdir);
-    repaired += 1;
+/**
+ * Internal recursive helper: returns `dir` itself if it directly contains ≥1
+ * non-MEMORY `.md` file, plus any matching descendant directories.
+ */
+async function findMemoryFoldersRecurse(dir: string): Promise<string[]> {
+  let dirents;
+  try {
+    dirents = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
   }
 
-  return repaired;
+  const results: string[] = [];
+  let hasDirectMd = false;
+
+  for (const dirent of dirents) {
+    if (dirent.isDirectory()) {
+      const sub = await findMemoryFoldersRecurse(path.join(dir, dirent.name));
+      results.push(...sub);
+    } else if (
+      dirent.isFile() &&
+      dirent.name.endsWith(".md") &&
+      dirent.name !== "MEMORY.md"
+    ) {
+      hasDirectMd = true;
+    }
+  }
+
+  if (hasDirectMd) {
+    results.push(dir);
+  }
+
+  return results;
 }
 
 /** Recursively collect all .md files under `dir` (excluding MEMORY.md). */
