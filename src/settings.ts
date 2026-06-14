@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import * as fs from "fs";
 import type MemoryGatekeeperPlugin from "./main";
+import { repairMissingIndexes } from "./core/memory-index";
 
 /** Returns true if the path exists and is a directory. */
 export function isValidTargetFolder(folder: string): boolean {
@@ -87,6 +88,30 @@ export class GatekeeperSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           await this.plugin.reconfigure();
           new Notice("Dismissed reviews reset.");
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Repair MEMORY.md indexes")
+      .setDesc(
+        "Scans all project subfolders in the gatekeeper vault and the target memory folder. " +
+          "For any folder that has .md files but no MEMORY.md, generates the missing index.",
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Repair").onClick(async () => {
+          if (!this.plugin.isConfigured()) {
+            new Notice("No valid target folder configured.");
+            return;
+          }
+          const targetRepaired = await repairMissingIndexes(
+            this.plugin.settings.targetFolder,
+          ).catch(() => 0);
+          const vaultBase = (this.plugin.app.vault.adapter as any)
+            .basePath as string | undefined;
+          const vaultRepaired = vaultBase
+            ? await repairMissingIndexes(vaultBase).catch(() => 0)
+            : 0;
+          new Notice(`Repaired ${targetRepaired + vaultRepaired} folder(s).`);
         }),
       );
   }

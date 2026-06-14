@@ -87,6 +87,52 @@ export async function regenerateMemoryIndex(
   await fsp.writeFile(indexPath, lines.join("\n"), "utf8");
 }
 
+/**
+ * Scan immediate subdirectories of `rootDir` and, for each that:
+ *   (a) has no MEMORY.md at its root, AND
+ *   (b) contains at least one .md file (other than MEMORY.md) anywhere inside it,
+ * generate a fresh MEMORY.md via `regenerateMemoryIndex`.
+ *
+ * Returns the number of folders repaired. Subfolders that already have a
+ * MEMORY.md are left untouched. Top-level files (not in any subfolder) are
+ * ignored. A non-existent `rootDir` returns 0 without throwing.
+ *
+ * Node-`fs`-only; no Obsidian imports.
+ */
+export async function repairMissingIndexes(rootDir: string): Promise<number> {
+  let dirents;
+  try {
+    dirents = await fsp.readdir(rootDir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+
+  let repaired = 0;
+  for (const dirent of dirents) {
+    if (!dirent.isDirectory()) continue;
+    const subdir = path.join(rootDir, dirent.name);
+    const indexPath = path.join(subdir, "MEMORY.md");
+
+    // Skip if MEMORY.md already exists.
+    try {
+      await fsp.access(indexPath);
+      continue; // already has MEMORY.md
+    } catch {
+      // MEMORY.md absent — proceed
+    }
+
+    // Only repair if there is at least one .md file (other than MEMORY.md)
+    // anywhere inside this subfolder.
+    const mdFiles = await collectMdFiles(subdir, subdir);
+    if (mdFiles.length === 0) continue;
+
+    await regenerateMemoryIndex(subdir);
+    repaired += 1;
+  }
+
+  return repaired;
+}
+
 /** Recursively collect all .md files under `dir` (excluding MEMORY.md). */
 async function collectMdFiles(
   rootFolder: string,

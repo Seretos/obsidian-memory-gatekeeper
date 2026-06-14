@@ -166,6 +166,19 @@ export class ComparisonEngine {
       ? path.join(this.settings.targetFolder, firstSegment)
       : null;
 
+    // Vault-side project folder (parallel to the target-side project folder).
+    let vaultProjectFolder: string | null = null;
+    if (hasProjectFolder) {
+      try {
+        const vaultBase = (this.app.vault.adapter as any).basePath as string;
+        if (vaultBase) {
+          vaultProjectFolder = path.join(vaultBase, firstSegment);
+        }
+      } catch {
+        // Non-fatal: vault base path unavailable.
+      }
+    }
+
     if (vault.trim() === "") {
       // Tombstone: the upstream hook signalled a deletion. Remove both copies.
       try {
@@ -185,7 +198,12 @@ export class ComparisonEngine {
     // Skipped for top-level files (no project subfolder).
     if (projectFolder) {
       await regenerateMemoryIndex(projectFolder).catch((e: unknown) => {
-        console.warn("[memory-index] regeneration failed:", e);
+        console.warn("[memory-index] target-side regeneration failed:", e);
+      });
+    }
+    if (vaultProjectFolder) {
+      await regenerateMemoryIndex(vaultProjectFolder).catch((e: unknown) => {
+        console.warn("[memory-index] vault-side regeneration failed:", e);
       });
     }
 
@@ -202,6 +220,35 @@ export class ComparisonEngine {
     const target = await this.readTarget(relPath);
     if (target === null) return false;
     await this.app.vault.adapter.write(normalizePath(relPath), target);
+
+    // Regenerate MEMORY.md on both sides after discarding a change.
+    const firstSegment = relPath.split("/")[0];
+    const hasProjectFolder = relPath.includes("/");
+
+    if (hasProjectFolder) {
+      const targetProjectFolder = path.join(
+        this.settings.targetFolder,
+        firstSegment,
+      );
+      await regenerateMemoryIndex(targetProjectFolder).catch((e: unknown) => {
+        console.warn("[memory-index] target-side regeneration failed:", e);
+      });
+
+      try {
+        const vaultBase = (this.app.vault.adapter as any).basePath as string;
+        if (vaultBase) {
+          const vaultProjectFolder = path.join(vaultBase, firstSegment);
+          await regenerateMemoryIndex(vaultProjectFolder).catch(
+            (e: unknown) => {
+              console.warn("[memory-index] vault-side regeneration failed:", e);
+            },
+          );
+        }
+      } catch {
+        // Non-fatal: vault base path unavailable.
+      }
+    }
+
     await this.scan();
     return true;
   }
