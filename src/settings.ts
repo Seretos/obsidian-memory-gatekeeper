@@ -80,6 +80,24 @@ export class GatekeeperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Open diff by default for divergent files")
+      .setDesc(
+        "When enabled, clicking a divergent file (new or modified) in the Explorer " +
+          "or Graph opens the side-by-side CompareView instead of the plain Markdown view. " +
+          "Only active when a valid target folder is configured. " +
+          "Raw note access is always available via the right-click context menu.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.openDiffByDefault)
+          .onChange(async (value) => {
+            this.plugin.settings.openDiffByDefault = value;
+            await this.plugin.saveSettings();
+            // No reconfigure needed — interceptors read the live setting at click time.
+          }),
+      );
+
+    new Setting(containerEl)
       .setName("Reset dismissed reviews")
       .setDesc("Clear all dismissed entries so every divergence re-surfaces.")
       .addButton((btn) =>

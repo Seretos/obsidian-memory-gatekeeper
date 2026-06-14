@@ -53,6 +53,12 @@ export interface GatekeeperSettings {
   graphHighlightColor: number;
   /** relPath -> dismissed content hash. Re-surfaces when the hash changes. */
   dismissed: Record<string, string>;
+  /**
+   * When true (default), clicking a divergent file (status "new" or "modified")
+   * in the Explorer or Graph opens CompareView instead of the plain Markdown view.
+   * Only active when the plugin is configured (valid target folder set).
+   */
+  openDiffByDefault: boolean;
 }
 
 export const DEFAULT_SETTINGS: GatekeeperSettings = {
@@ -61,4 +67,5 @@ export const DEFAULT_SETTINGS: GatekeeperSettings = {
   pollIntervalMs: 4000,
   graphHighlightColor: 0xff5555,
   dismissed: {},
+  openDiffByDefault: true,
 };
