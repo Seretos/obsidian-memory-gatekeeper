@@ -6,6 +6,7 @@ import {
   isMemoryIndexPath,
   parseNameDescription,
   parseProject,
+  planVaultDeletePropagation,
   regenerateMemoryIndex,
   repairMissingIndexes,
 } from "../src/core/memory-index";
@@ -37,6 +38,76 @@ describe("isMemoryIndexPath", () => {
 
   it("returns false for MEMORY.md.bak (non-exact basename)", () => {
     expect(isMemoryIndexPath("proj/MEMORY.md.bak")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// planVaultDeletePropagation
+// ---------------------------------------------------------------------------
+
+describe("planVaultDeletePropagation", () => {
+  const TARGET = "/target";
+  const VAULT = "/vault";
+
+  it("MEMORY.md → propagate:false, all nulls", () => {
+    const plan = planVaultDeletePropagation("proj/memory/MEMORY.md", {
+      targetFolder: TARGET,
+      vaultBase: VAULT,
+      suppressed: false,
+    });
+    expect(plan.propagate).toBe(false);
+    expect(plan.targetFile).toBeNull();
+    expect(plan.targetMemoryFolder).toBeNull();
+    expect(plan.vaultMemoryFolder).toBeNull();
+  });
+
+  it("suppressed:true → propagate:false regardless of path", () => {
+    const plan = planVaultDeletePropagation("proj/memory/note.md", {
+      targetFolder: TARGET,
+      vaultBase: VAULT,
+      suppressed: true,
+    });
+    expect(plan.propagate).toBe(false);
+    expect(plan.targetFile).toBeNull();
+    expect(plan.targetMemoryFolder).toBeNull();
+    expect(plan.vaultMemoryFolder).toBeNull();
+  });
+
+  it("normal nested file → propagate:true with correct targetFile and both memory folders", () => {
+    const plan = planVaultDeletePropagation("proj/memory/note.md", {
+      targetFolder: TARGET,
+      vaultBase: VAULT,
+      suppressed: false,
+    });
+    expect(plan.propagate).toBe(true);
+    // Normalise separators for cross-platform comparison.
+    expect(plan.targetFile?.replace(/\\/g, "/")).toBe("/target/proj/memory/note.md");
+    expect(plan.targetMemoryFolder?.replace(/\\/g, "/")).toBe("/target/proj/memory");
+    expect(plan.vaultMemoryFolder?.replace(/\\/g, "/")).toBe("/vault/proj/memory");
+  });
+
+  it("vaultBase null → vaultMemoryFolder null, target side still populated", () => {
+    const plan = planVaultDeletePropagation("proj/memory/note.md", {
+      targetFolder: TARGET,
+      vaultBase: null,
+      suppressed: false,
+    });
+    expect(plan.propagate).toBe(true);
+    expect(plan.targetFile?.replace(/\\/g, "/")).toBe("/target/proj/memory/note.md");
+    expect(plan.targetMemoryFolder?.replace(/\\/g, "/")).toBe("/target/proj/memory");
+    expect(plan.vaultMemoryFolder).toBeNull();
+  });
+
+  it("top-level file (no '/') → propagate:true, targetFile set, both folders null", () => {
+    const plan = planVaultDeletePropagation("note.md", {
+      targetFolder: TARGET,
+      vaultBase: VAULT,
+      suppressed: false,
+    });
+    expect(plan.propagate).toBe(true);
+    expect(plan.targetFile?.replace(/\\/g, "/")).toBe("/target/note.md");
+    expect(plan.targetMemoryFolder).toBeNull();
+    expect(plan.vaultMemoryFolder).toBeNull();
   });
 });
 

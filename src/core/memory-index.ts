@@ -56,6 +56,66 @@ export function isMemoryIndexPath(relPath: string): boolean {
 }
 
 /**
+ * Describes what handleVaultDelete should do for a given deletion event.
+ * Pure — computed entirely from relPath and caller-supplied options; no I/O.
+ */
+export interface VaultDeletePlan {
+  /** false for MEMORY.md paths or suppressed (plugin-initiated) deletions. */
+  propagate: boolean;
+  /** Absolute path of the target file to unlink; null when !propagate. */
+  targetFile: string | null;
+  /** Absolute target-side memory folder to reindex; null for top-level files
+   *  or when !propagate. */
+  targetMemoryFolder: string | null;
+  /** Absolute vault-side memory folder to reindex; null when vaultBase is
+   *  unavailable, for top-level files, or when !propagate. */
+  vaultMemoryFolder: string | null;
+}
+
+/**
+ * Compute the propagation plan for a vault `delete` event.
+ *
+ * @param relPath    Vault-relative path of the deleted file (forward slashes).
+ * @param opts.targetFolder  Absolute path of the target (real memory) root.
+ * @param opts.vaultBase     Absolute vault root path, or null if unavailable.
+ * @param opts.suppressed    True when this deletion was initiated by the plugin
+ *                           itself (tombstone accept guard).
+ *
+ * Pure — no I/O, no Obsidian imports.
+ */
+export function planVaultDeletePropagation(
+  relPath: string,
+  opts: {
+    targetFolder: string;
+    vaultBase: string | null;
+    suppressed: boolean;
+  },
+): VaultDeletePlan {
+  const noop: VaultDeletePlan = {
+    propagate: false,
+    targetFile: null,
+    targetMemoryFolder: null,
+    vaultMemoryFolder: null,
+  };
+
+  if (isMemoryIndexPath(relPath) || opts.suppressed) return noop;
+
+  const targetFile = path.join(opts.targetFolder, relPath);
+
+  let targetMemoryFolder: string | null = null;
+  let vaultMemoryFolder: string | null = null;
+
+  if (relPath.includes("/")) {
+    targetMemoryFolder = path.dirname(targetFile);
+    if (opts.vaultBase) {
+      vaultMemoryFolder = path.dirname(path.join(opts.vaultBase, relPath));
+    }
+  }
+
+  return { propagate: true, targetFile, targetMemoryFolder, vaultMemoryFolder };
+}
+
+/**
  * Parse the `project:` field from YAML frontmatter. Returns the trimmed value
  * when found and non-empty, null otherwise. Independent of parseNameDescription's
  * null rule — a file can lack name/description but still carry a project field.

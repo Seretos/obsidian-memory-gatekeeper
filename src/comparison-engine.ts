@@ -4,7 +4,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { StatusStore } from "./status-store";
 import { classify, hashContent } from "./core/compare";
-import { isMemoryIndexPath, regenerateMemoryIndex } from "./core/memory-index";
+import {
+  isMemoryIndexPath,
+  planVaultDeletePropagation,
+  regenerateMemoryIndex,
+} from "./core/memory-index";
 import type { DiffData, DivergentEntry, GatekeeperSettings } from "./types";
 
 /**
@@ -20,6 +24,10 @@ export class ComparisonEngine {
   private debounceTimer?: ReturnType<typeof setTimeout>;
   private listeners: Array<() => void> = [];
   private running = false;
+  /** relPaths of vault files being removed by the plugin itself (tombstone
+   *  accept). The vault `delete` event fires for those too; this guard stops
+   *  handleVaultDelete from double-processing them. */
+  private suppressDelete = new Set<string>();
 
   constructor(
     private app: App,
@@ -62,7 +70,16 @@ export class ComparisonEngine {
     };
     this.vaultRefs.push(this.app.vault.on("modify", handler));
     this.vaultRefs.push(this.app.vault.on("create", handler));
-    this.vaultRefs.push(this.app.vault.on("delete", handler));
+    // Delete has its own handler: propagate to target and reindex.
+    // isTracked() matches all .md files including MEMORY.md; the MEMORY.md
+    // exclusion is handled inside handleVaultDelete, not here.
+    this.vaultRefs.push(
+      this.app.vault.on("delete", (file) => {
+        if (file instanceof TFile && this.isTracked(file)) {
+          void this.handleVaultDelete(file.path);
+        }
+      }),
+    );
     this.vaultRefs.push(
       this.app.vault.on("rename", (file) => {
         if (file instanceof TFile) this.scheduleScan();
@@ -187,7 +204,17 @@ export class ComparisonEngine {
         if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
       }
       // This is the one deliberate vault deletion, gated on the empty tombstone.
-      await this.app.vault.adapter.remove(normalizePath(relPath));
+      // Suppress the resulting vault `delete` event so handleVaultDelete does
+      // not attempt a redundant target deletion (the unlink above already did it).
+      this.suppressDelete.add(relPath);
+      try {
+        await this.app.vault.adapter.remove(normalizePath(relPath));
+      } finally {
+        // Defer so a synchronously- or microtask-queued vault `delete` event
+        // from remove() is consumed by handleVaultDelete while the guard is
+        // still live. Leaving it set for one extra macrotask is harmless.
+        setTimeout(() => this.suppressDelete.delete(relPath), 0);
+      }
     } else {
       // Normal accept: copy vault → target.
       await fsp.mkdir(path.dirname(dest), { recursive: true });
@@ -249,6 +276,57 @@ export class ComparisonEngine {
 
     await this.scan();
     return true;
+  }
+
+  /**
+   * Propagate a user deletion of a vault (gatekeeper) file to the target (real
+   * memory) folder, then regenerate MEMORY.md on both sides. MEMORY.md
+   * deletions are not propagated (the index is auto-generated). Plugin-initiated
+   * vault removals (tombstone accept) are skipped via suppressDelete.
+   */
+  private async handleVaultDelete(relPath: string): Promise<void> {
+    if (isMemoryIndexPath(relPath)) { this.scheduleScan(); return; }
+    // Plugin-initiated removal (tombstone accept): acceptToTarget already
+    // deleted the target file and will run scan() itself — no work needed here.
+    if (this.suppressDelete.has(relPath)) return;
+
+    let vaultBase: string | null = null;
+    try {
+      vaultBase = (this.app.vault.adapter as any).basePath as string ?? null;
+    } catch {
+      // Non-fatal: vault base path unavailable.
+    }
+
+    const plan = planVaultDeletePropagation(relPath, {
+      targetFolder: this.settings.targetFolder,
+      vaultBase,
+      suppressed: false, // already checked above
+    });
+
+    if (!plan.propagate) return; // shouldn't happen given guards above, but be safe
+
+    // Delete the corresponding target file (best-effort).
+    try {
+      await fsp.unlink(plan.targetFile!);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.warn("[vault-delete] target unlink failed:", e);
+      }
+    }
+
+    // Regenerate MEMORY.md on both sides from the remaining files.
+    if (plan.targetMemoryFolder) {
+      await regenerateMemoryIndex(plan.targetMemoryFolder).catch((e: unknown) => {
+        console.warn("[memory-index] target-side regeneration failed:", e);
+      });
+    }
+    if (plan.vaultMemoryFolder) {
+      await regenerateMemoryIndex(plan.vaultMemoryFolder).catch((e: unknown) => {
+        console.warn("[memory-index] vault-side regeneration failed:", e);
+      });
+    }
+
+    await this.scan();
   }
 
   /** Write arbitrary content back to the vault (gatekeeper) file. */
