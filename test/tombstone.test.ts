@@ -76,43 +76,57 @@ describe("classify for tombstone-shaped vault files", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. projectFolder guard: top-level file (no "/" in relPath) must not trigger
-//    regenerateMemoryIndex.
-//    The guard is: hasProjectFolder = relPath.includes("/")
+// 3. Memory-folder guard: top-level file (no "/" in relPath) must not trigger
+//    regenerateMemoryIndex. For files inside a subfolder the memory folder is
+//    the directory that DIRECTLY CONTAINS the file (path.dirname of its full
+//    path), not merely the first path segment.
+//    The guard is: hasParentFolder = relPath.includes("/")
 // ---------------------------------------------------------------------------
 
 describe("acceptToTarget projectFolder guard logic", () => {
-  /** Mirror of the inline guard in acceptToTarget(). */
-  function deriveProjectFolder(
+  /**
+   * Mirror of the inline guard in acceptToTarget() and revertFromTarget().
+   * Production code: `path.dirname(path.join(targetFolder, relPath))`.
+   */
+  function deriveMemoryFolder(
     targetFolder: string,
     relPath: string,
   ): string | null {
-    const firstSegment = relPath.split("/")[0];
-    const hasProjectFolder = relPath.includes("/");
-    return hasProjectFolder
-      ? require("path").join(targetFolder, firstSegment)
-      : null;
+    const hasParentFolder = relPath.includes("/");
+    if (!hasParentFolder) return null;
+    return require("path").dirname(
+      require("path").join(targetFolder, relPath),
+    );
   }
 
   it("returns null for a top-level file (no subdirectory)", () => {
-    expect(deriveProjectFolder("/target", "top-level-file.md")).toBeNull();
+    expect(deriveMemoryFolder("/target", "top-level-file.md")).toBeNull();
   });
 
-  it("returns the project subfolder for a file one level deep", () => {
-    const result = deriveProjectFolder("/target", "my-project/memory.md");
+  it("returns the containing directory for a file one level deep", () => {
+    const result = deriveMemoryFolder("/target", "my-project/memory.md");
     // Normalise separators for cross-platform comparison.
     expect(result?.replace(/\\/g, "/")).toBe("/target/my-project");
   });
 
-  it("returns the first-segment subfolder for a deeply nested file", () => {
-    const result = deriveProjectFolder(
+  it("returns the immediate parent folder for a file in <project>/memory/", () => {
+    // The real layout: <project>/memory/<file>.md — index must land in memory/.
+    const result = deriveMemoryFolder(
+      "/target",
+      "my-project/memory/file.md",
+    );
+    expect(result?.replace(/\\/g, "/")).toBe("/target/my-project/memory");
+  });
+
+  it("returns the immediate parent for any depth of nesting", () => {
+    const result = deriveMemoryFolder(
       "/target",
       "my-project/sub/deep.md",
     );
-    expect(result?.replace(/\\/g, "/")).toBe("/target/my-project");
+    expect(result?.replace(/\\/g, "/")).toBe("/target/my-project/sub");
   });
 
   it("a filename with no extension but no slash is still top-level (returns null)", () => {
-    expect(deriveProjectFolder("/target", "bare-name")).toBeNull();
+    expect(deriveMemoryFolder("/target", "bare-name")).toBeNull();
   });
 });
