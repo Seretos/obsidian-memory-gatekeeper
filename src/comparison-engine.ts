@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { StatusStore } from "./status-store";
 import { classify, hashContent } from "./core/compare";
-import { regenerateMemoryIndex } from "./core/memory-index";
+import { isMemoryIndexPath, regenerateMemoryIndex } from "./core/memory-index";
 import type { DiffData, DivergentEntry, GatekeeperSettings } from "./types";
 
 /**
@@ -111,6 +111,8 @@ export class ComparisonEngine {
     const divergent: DivergentEntry[] = [];
     for (const file of files) {
       const relPath = file.path;
+      // MEMORY.md is auto-generated on both sides; exclude it from review.
+      if (isMemoryIndexPath(relPath)) continue;
       const vaultContent = await this.app.vault.adapter.read(relPath);
       const vaultHash = hashContent(vaultContent);
       const targetContent = await this.readTarget(relPath);

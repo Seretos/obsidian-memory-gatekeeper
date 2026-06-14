@@ -44,6 +44,18 @@ export function parseNameDescription(
 }
 
 /**
+ * Returns true when `relPath` (Obsidian vault-relative, forward-slash
+ * separated) names a `MEMORY.md` index file — i.e. its basename is exactly
+ * `MEMORY.md` (case-sensitive, matching the exclusion used in collectMdFiles).
+ * Works for root-level `MEMORY.md`, `proj/memory/MEMORY.md`, etc.
+ *
+ * Pure — no Obsidian imports, no DOM access.
+ */
+export function isMemoryIndexPath(relPath: string): boolean {
+  return relPath.split("/").pop() === "MEMORY.md";
+}
+
+/**
  * Parse the `project:` field from YAML frontmatter. Returns the trimmed value
  * when found and non-empty, null otherwise. Independent of parseNameDescription's
  * null rule — a file can lack name/description but still carry a project field.

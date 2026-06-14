@@ -3,11 +3,42 @@ import { promises as fsp } from "fs";
 import * as path from "path";
 import * as os from "os";
 import {
+  isMemoryIndexPath,
   parseNameDescription,
   parseProject,
   regenerateMemoryIndex,
   repairMissingIndexes,
 } from "../src/core/memory-index";
+
+// ---------------------------------------------------------------------------
+// isMemoryIndexPath
+// ---------------------------------------------------------------------------
+
+describe("isMemoryIndexPath", () => {
+  it("returns true for a file at <project>/memory/MEMORY.md", () => {
+    expect(isMemoryIndexPath("proj/memory/MEMORY.md")).toBe(true);
+  });
+
+  it("returns true for a root-level MEMORY.md (bare name)", () => {
+    expect(isMemoryIndexPath("MEMORY.md")).toBe(true);
+  });
+
+  it("returns true for a deeply nested MEMORY.md", () => {
+    expect(isMemoryIndexPath("a/b/c/MEMORY.md")).toBe(true);
+  });
+
+  it("returns false for an ordinary memory note", () => {
+    expect(isMemoryIndexPath("proj/memory/some-note.md")).toBe(false);
+  });
+
+  it("returns false for memory.md (lowercase — case-sensitive)", () => {
+    expect(isMemoryIndexPath("proj/memory/memory.md")).toBe(false);
+  });
+
+  it("returns false for MEMORY.md.bak (non-exact basename)", () => {
+    expect(isMemoryIndexPath("proj/MEMORY.md.bak")).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // parseNameDescription
