@@ -263,8 +263,9 @@ export async function repairMissingIndexes(
     }
     if (regenerated) repaired += 1;
 
-    // Mirror into the vault if vaultRoot is provided and the vault folder exists.
-    if (vaultRoot !== null) {
+    // Mirror into the vault only when regeneration succeeded — do not copy a
+    // stale or absent MEMORY.md if the target-side write failed.
+    if (regenerated && vaultRoot !== null) {
       const rel = path.relative(targetRoot, folder);
       const vaultFolder = path.join(vaultRoot, rel);
       try {

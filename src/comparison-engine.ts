@@ -300,7 +300,7 @@ export class ComparisonEngine {
     const plan = planVaultDeletePropagation(relPath, {
       targetFolder: this.settings.targetFolder,
       vaultBase,
-      suppressed: false, // already checked above
+      suppressed: this.suppressDelete.has(relPath),
     });
 
     if (!plan.propagate) return; // shouldn't happen given guards above, but be safe
@@ -315,6 +315,8 @@ export class ComparisonEngine {
     }
 
     // Regenerate MEMORY.md on both sides from the remaining files.
+    // This happens synchronously (awaited) before scheduling the scan so that
+    // burst deletions do not race the regeneration.
     if (plan.targetMemoryFolder) {
       await regenerateMemoryIndex(plan.targetMemoryFolder).catch((e: unknown) => {
         console.warn("[memory-index] target-side regeneration failed:", e);
@@ -326,7 +328,9 @@ export class ComparisonEngine {
       });
     }
 
-    await this.scan();
+    // Coalesce concurrent deletes into a single debounced scan rather than
+    // firing one un-debounced scan per deleted file.
+    this.scheduleScan();
   }
 
   /** Write arbitrary content back to the vault (gatekeeper) file. */

@@ -660,6 +660,36 @@ describe("repairMissingIndexes", () => {
     expect(idx2).toContain("- [B](b.md) — Second");
   });
 
+  it("mirror is written only after successful regeneration (gating invariant)", async () => {
+    // A project whose target memory folder has .md files AND whose vault
+    // folder already exists. Regeneration succeeds → mirror must be written.
+    await writeUnder(
+      targetRoot,
+      path.join("proj-gate", "memory", "note.md"),
+      MEMORY_FILE("Note", "Gating test"),
+    );
+    await fsp.mkdir(path.join(vaultRoot, "proj-gate", "memory"), {
+      recursive: true,
+    });
+
+    const count = await repairMissingIndexes(targetRoot, vaultRoot);
+
+    expect(count).toBe(1);
+    // Target index was written.
+    const targetContent = await fsp.readFile(
+      path.join(targetRoot, "proj-gate", "memory", "MEMORY.md"),
+      "utf8",
+    );
+    expect(targetContent).toContain("- [Note](note.md) — Gating test");
+    // Vault mirror must match the target index exactly (copy happened because
+    // regenerated === true and the vault folder existed).
+    const vaultContent = await fsp.readFile(
+      path.join(vaultRoot, "proj-gate", "memory", "MEMORY.md"),
+      "utf8",
+    );
+    expect(vaultContent).toBe(targetContent);
+  });
+
   it("non-existent targetRoot returns 0 without throwing", async () => {
     const nonExistent = path.join(targetRoot, "does-not-exist");
     const count = await repairMissingIndexes(nonExistent, null);
