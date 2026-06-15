@@ -81,6 +81,31 @@ Mental model — get this right or the directions invert:
   access is try/catch-wrapped and may break on Obsidian updates.
 - **Explorer markers** toggle CSS classes on `.nav-file-title[data-path]`. Also
   unofficial; we re-apply on `layout-change` because Obsidian rebuilds that DOM.
+- **Explorer click interception** (`ExplorerDecorator`) registers a capture-phase
+  `click` listener on `document` that calls `event.target.closest('.nav-file-title[data-path]')`
+  to identify which file was clicked. If the file is divergent and the "open diff by
+  default" setting is enabled, the event is cancelled and `openCompare(relPath)` is
+  called instead. The same function reference is removed in `clear()` via
+  `document.removeEventListener(..., { capture: true })` — the `{ capture: true }`
+  option must be present in both calls or the listener is not removed. Relies on the
+  same undocumented `.nav-file-title[data-path]` CSS class as the marker feature; both
+  will break together if Obsidian renames that element. **Modifier-key pass-through:**
+  the handler calls `isPlainPrimaryClick(evt)` and returns immediately (without
+  intercepting) if any modifier key (Ctrl/Cmd/Alt/Shift) is held or the button is
+  not the primary button, so Ctrl/Cmd+click (new pane), Alt+click (background),
+  middle-click, etc. behave normally even for divergent files.
+- **Graph click interception** (`GraphClickInterceptor`) wraps each graph leaf's
+  `renderer.onNodeClick` (the same renderer internals as `GraphLabelDecorator`). The
+  original function is saved per renderer in a `Map`; the wrapper checks divergence +
+  setting via `shouldOpenDiffByDefault` and either calls `openCompare(id)` or delegates
+  to the original. All renderer access is try/catch-wrapped. `clear()` restores all
+  saved originals. `refresh()` is called from `refreshDecorations()` (driven by
+  `layout-change` and `active-leaf-change`) so newly opened graph leaves are wrapped
+  automatically. May break on Obsidian updates that rename or restructure `renderer`.
+  **Modifier-key pass-through:** the wrapper searches `args` for a `MouseEvent`
+  (position in args is undocumented/fragile) and calls `isPlainPrimaryClick` on it; if
+  no MouseEvent is found or the click is modified/non-primary, it delegates to the
+  original handler (fail-safe).
 
 ## Platform / build
 

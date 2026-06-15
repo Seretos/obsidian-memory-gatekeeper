@@ -8,6 +8,7 @@ import { ComparisonEngine } from "./comparison-engine";
 import { ExplorerDecorator } from "./explorer-decorator";
 import { GraphDecorator } from "./graph-decorator";
 import { GraphLabelDecorator } from "./graph-label-decorator";
+import { GraphClickInterceptor } from "./graph-click-interceptor";
 import { ReviewView } from "./review-view";
 import { CompareView } from "./compare-view";
 import { StatusStore } from "./status-store";
@@ -31,6 +32,7 @@ export default class MemoryGatekeeperPlugin
   private explorer?: ExplorerDecorator;
   private graph?: GraphDecorator;
   private graphLabels?: GraphLabelDecorator;
+  private graphClickInterceptor?: GraphClickInterceptor;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -133,9 +135,22 @@ export default class MemoryGatekeeperPlugin
   }
 
   private async activate(): Promise<void> {
-    this.explorer = new ExplorerDecorator(this.app, this.store);
+    this.explorer = new ExplorerDecorator(
+      this.app,
+      this.store,
+      this.settings,
+      () => this.isConfigured(),
+      this.openCompare.bind(this),
+    );
     this.graph = new GraphDecorator(this.app, this.store);
     this.graphLabels = new GraphLabelDecorator(this.app);
+    this.graphClickInterceptor = new GraphClickInterceptor(
+      this.app,
+      this.store,
+      this.settings,
+      () => this.isConfigured(),
+      this.openCompare.bind(this),
+    );
     this.engine = new ComparisonEngine(this.app, this.settings, this.store);
     this.engine.onChange(() => this.refreshUI());
     await this.engine.start();
@@ -147,9 +162,11 @@ export default class MemoryGatekeeperPlugin
     this.explorer?.clear();
     this.graph?.clear();
     this.graphLabels?.clear();
+    this.graphClickInterceptor?.clear();
     this.explorer = undefined;
     this.graph = undefined;
     this.graphLabels = undefined;
+    this.graphClickInterceptor = undefined;
     this.store.setAll([]);
     this.refreshViews();
   }
@@ -173,6 +190,7 @@ export default class MemoryGatekeeperPlugin
     this.explorer?.refresh();
     this.graph?.refresh();
     this.graphLabels?.refresh();
+    this.graphClickInterceptor?.refresh();
   }
 
   private refreshViews(): void {
