@@ -240,12 +240,12 @@ export default class MemoryGatekeeperPlugin
       new Notice(notice);
       return;
     }
-    // New file with no target counterpart: never delete, so hide it (by content
-    // hash) until it changes again.
-    this.store.dismiss(entry);
-    await this.saveSettings();
-    this.refreshUI();
-    new Notice(`Hidden new proposal until it changes: ${relPath}`);
+    // New file with no target counterpart: delete it from the vault so no
+    // orphan remains. The vault `delete` event is suppressed inside discardNew
+    // so handleVaultDelete does not attempt a redundant target unlink.
+    await this.engine.discardNew(relPath);
+    // discardNew rescans -> refreshUI fires via onChange.
+    new Notice(`Discarded new proposal (removed from vault): ${relPath}`);
   }
 
   async openFile(relPath: string): Promise<void> {

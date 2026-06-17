@@ -29,22 +29,28 @@ Mental model — get this right or the directions invert:
     proposed change. The file stays; the marker clears on the next scan because
     the two sides are now identical.
   - **Exception — new files** (no target counterpart): `revertFromTarget()`
-    returns false (nothing to revert to, and we never delete). Discard then
-    falls back to hiding the file by `relPath + content hash`
-    (`settings.dismissed`); it re-surfaces once its content changes. This is the
-    only remaining use of the dismissed map, and `scan()` only consults it for
-    `status === "new"`. `StatusStore` takes the dismissed map by reference so
-    mutating it persists via `saveSettings()`.
-  - **Exception — tombstone accept** (the one deliberate vault deletion): if the
+    returns false (nothing to revert to). Discard then calls `discardNew()`,
+    which **deletes the vault file** (via `vault.adapter.remove`) so no orphan
+    proposal remains. The vault `delete` event is suppressed inside `discardNew`
+    so `handleVaultDelete` does not attempt a redundant target-side unlink (there
+    is no target file for a "new" entry). After the removal, `discardNew`
+    regenerates the vault-side `MEMORY.md` in the file's parent folder (if any)
+    and then rescans. The dismissed map (`settings.dismissed`) is no longer used
+    for this path.
+  - **Exception — tombstone accept** (deliberate vault deletion #1): if the
     vault file is empty (`vaultContent.trim() === ""`), it is treated as a
     deletion tombstone written by the upstream memory hook to signal that the
     corresponding real memory file should be removed. Accepting such an entry in
     `ComparisonEngine.acceptToTarget` deletes both the target file (via
-    `fs.unlink`) and the vault file (via `vault.adapter.remove`). This is the
-    only code path that deletes a vault file, and it is strictly gated on the
-    empty-tombstone condition. Discarding a tombstone (`dismiss`) calls
-    `revertFromTarget` as normal, which restores the target's content into the
-    vault file, effectively cancelling the deletion proposal.
+    `fs.unlink`) and the vault file (via `vault.adapter.remove`). This is
+    strictly gated on the empty-tombstone condition. Discarding a tombstone
+    (`dismiss`) calls `revertFromTarget` as normal, which restores the target's
+    content into the vault file, effectively cancelling the deletion proposal.
+  - **Note on deliberate vault deletions**: there are now exactly two code paths
+    that delete a vault file — (1) the tombstone-accept branch in
+    `acceptToTarget` and (2) `discardNew` for new-file proposals. Both add
+    `relPath` to `suppressDelete` before calling `vault.adapter.remove` so
+    `handleVaultDelete` does not attempt a double-delete on the target side.
 
 - **The plugin is inert until a valid target folder is set.** This is deliberate
   so unrelated vaults aren't affected (plugin settings are per-vault in
