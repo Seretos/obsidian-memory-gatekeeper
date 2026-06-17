@@ -279,6 +279,44 @@ export class ComparisonEngine {
   }
 
   /**
+   * Discard a "new" vault file (no target counterpart) by removing it from
+   * the vault. This is the second deliberate vault deletion alongside the
+   * tombstone-accept path in acceptToTarget. The vault `delete` event is
+   * suppressed via suppressDelete so handleVaultDelete does not attempt a
+   * pointless target-side unlink (there is no target file for a "new" entry).
+   */
+  async discardNew(relPath: string): Promise<void> {
+    this.suppressDelete.add(relPath);
+    try {
+      await this.app.vault.adapter.remove(normalizePath(relPath));
+    } finally {
+      setTimeout(() => this.suppressDelete.delete(relPath), 0);
+    }
+
+    // Regenerate the vault-side MEMORY.md in the folder that contained the
+    // removed file so the index no longer lists it. Skipped for top-level
+    // files (no parent folder), mirroring the guard in acceptToTarget and
+    // revertFromTarget. Target-side regeneration is not needed — a "new" file
+    // has no target counterpart.
+    const hasParentFolder = relPath.includes("/");
+    if (hasParentFolder) {
+      try {
+        const vaultBase = (this.app.vault.adapter as any).basePath as string;
+        if (vaultBase) {
+          const vaultMemoryFolder = path.dirname(path.join(vaultBase, relPath));
+          await regenerateMemoryIndex(vaultMemoryFolder).catch((e: unknown) => {
+            console.warn("[memory-index] vault-side regeneration failed:", e);
+          });
+        }
+      } catch {
+        // Non-fatal: vault base path unavailable.
+      }
+    }
+
+    await this.scan();
+  }
+
+  /**
    * Propagate a user deletion of a vault (gatekeeper) file to the target (real
    * memory) folder, then regenerate MEMORY.md on both sides. MEMORY.md
    * deletions are not propagated (the index is auto-generated). Plugin-initiated

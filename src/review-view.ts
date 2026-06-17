@@ -105,12 +105,12 @@ export class ReviewView extends ItemView {
     };
 
     const dismissBtn = btns.createEl("button", { text: "Discard" });
-    dismissBtn.setAttr(
-      "aria-label",
-      isTombstone
-        ? "Cancel deletion — keep the memory file"
-        : "Revert vault file to the memory version",
-    );
+    const dismissLabel = isTombstone
+      ? "Cancel deletion — keep the memory file"
+      : status === "new"
+        ? "Remove this proposal from the vault"
+        : "Revert vault file to the memory version";
+    dismissBtn.setAttr("aria-label", dismissLabel);
     dismissBtn.onclick = () => void this.actions.dismiss(relPath);
   }
 }
